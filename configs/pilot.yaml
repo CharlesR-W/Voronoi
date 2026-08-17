@@ -1,0 +1,230 @@
+schema_version: 1
+
+protocol:
+  name: coarse-seed0
+  mode: exploratory
+  root_seed: 20260816
+
+runtime:
+  device: cpu
+  dtype: float32
+  workers: 0
+  deterministic: true
+  shard_images: 64
+
+inputs:
+  tracking2:
+    manifest: configs/inputs/tracking2_seed0.yaml
+    manifest_sha256: 15a822883e269d9accfbfeba35a5fa33ac04caebb30b970a8e0d48f92a565d84
+    root: ../Experiments/Tracking2
+    dataset_root: null
+    checkpoint_files: {}
+    transplant_results: null
+    expected_model: preactivation_resnet18_v2_width64
+    read_only: true
+
+experiment1:
+  checkpoints: [0, 1, 5, 20, 100]
+  cuts:
+    - stage1.block1
+    - stage1.block2
+    - stage2.block1
+    - stage2.block2
+    - stage3.block1
+    - stage3.block2
+    - stage4.block1
+    - stage4.block2
+  sentinel_cuts:
+    - stage1.block2
+    - stage2.block2
+    - stage3.block2
+    - stage4.block2
+  input_recipes:
+    - recipe_version: 1
+      name: clean
+      kind: clean
+      crop_padding: 0
+      flip_probability: 0.0
+      brightness_fraction: 0.0
+    - recipe_version: 1
+      name: crop_flip
+      kind: crop_flip
+      crop_padding: 4
+      flip_probability: 0.5
+      brightness_fraction: 0.0
+    - recipe_version: 1
+      name: mild_color
+      kind: mild_color
+      crop_padding: 0
+      flip_probability: 0.0
+      brightness_fraction: 0.1
+  # Deliberately UNFROZEN while the one-seed functional gate remains unrun.
+  # The confirmation stage refuses to become runnable until this status changes
+  # under a future schema with a registered protocol hash.
+  confirmation_training:
+    protocol_version: 1
+    status: unfrozen
+    architecture: preactivation_resnet18_v2_width64
+    model_source: pinned_tracking2_models_py
+    dataset: cifar10_pinned_parquet
+    training_seeds: [0, 1, 2]
+    epochs: 100
+    batch_size: 128
+    optimizer: sgd
+    learning_rate: 0.05
+    momentum: 0.9
+    weight_decay: 0.0
+    scheduler: multistep
+    milestones: [30, 60, 90]
+    gamma: 0.2
+    checkpoint_every_epochs: 1
+    early_batch_checkpoints: [0, 1, 5, 20, 100]
+    mixed_precision: false
+  # Versioned implementation-smoke choices; this is not a phenomenon probe.
+  mechanical_protocol:
+    protocol_version: 1
+    input_recipe: deterministic_linspace
+    input_min: -2.0
+    input_max: 2.0
+    input_batch_size: 1
+    directions_per_cut: 1
+    jvp_epsilon_float32: 0.001
+    jvp_epsilon_float64: 0.00001
+    denominator_floor: 1.0e-12
+    sample_axis: whole_tensor
+    aggregation: median_linear_p95
+  probe_banks:
+    fit_train_images: 2000
+    geometry_test_images: 2000
+    intervention_test_images: 256
+    independent_fit_train_images: 2000
+    max_sites_per_image: 32
+    equal_weight_per_image: true
+    intervention_nested_in_geometry: false
+    require_disjoint_fit_banks: true
+  state_metric:
+    primary: standardized
+    sensitivity: [standardized, raw]
+    rms_epsilon: 1.0e-6
+    codebook_scale: median_nearest_centroid_distance
+  codebooks:
+    primary_k: 32
+    k_values: [16, 32, 64]
+    algorithm: minibatch_kmeans
+    n_init: 10
+    max_iter: 300
+    batch_size: 4096
+    initialization: k-means++
+    # Provisional until frozen before the outcome-bearing coarse pass.
+    stability_protocol: refit_hungarian
+  boundary_paths:
+    directions: [empirical_chord, off_cloud]
+    # Provisional path grid and window; mechanics do not depend on these values.
+    r_grid: [0.0, 0.25, 0.5, 0.75, 0.9, 0.95, 1.0, 1.05, 1.1, 1.25, 1.5]
+    finite_difference_delta_r: 0.01
+    local_neighbors: 64
+    local_pca_rank: 8
+    boundary_energy_window: [0.9, 1.1]
+    boundary_energy_weighting: continuous_path_trapezoid
+    shifted_null: circular
+  snapping:
+    alphas: [0.0, 0.25, 0.5, 1.0]
+    boundary_fractions: [0.5, 0.9, 1.1]
+    spatial_supports: [single_token, sparse_tokens, all_tokens]
+    controls:
+      - identity
+      - same_norm_random
+      - away_from_centroid
+      - toward_other_centroid
+      - independent_codebook
+  nulls:
+    families: [epoch0, global_gaussian, class_conditional_gaussian]
+    covariance_shrinkage: 0.001
+    include_position_null_if_mutual_information_exceeds: 0.1
+  bootstrap:
+    resamples: 1000
+    unit: image
+    interval: percentile
+    confidence: 0.95
+
+experiment2:
+  oracle_factor_sizes: [2, 3]
+  refinement_factor_sizes: [4, 5]
+  train_primitives: 6
+  heldout_primitives: 3
+  generator_density: 0.5
+  unary_weight: 1.0
+  interaction_rho_values: [0.0, 0.05, 0.2, 0.5]
+  symmetry_delta_values: [0.0, 0.1, 0.5, 1.0]
+  group: cyclic
+  exact_instances: 20
+  null_instances: 100
+  support_penalties: [0.0, 0.0, 1.0, 2.0]
+  exact_protocol:
+    rho: 0.0
+    delta: 1.0
+    support_policy: anchored
+    random_relabel: true
+    max_states: 8
+    generator_rate_shape: 2.0
+    generator_connectivity_policy: mandatory_directed_cycle
+    generator_normalization: unit_mean_exit_rate
+    exhaustive_tie_atol: 1.0e-10
+    exhaustive_tie_rtol: 1.0e-10
+  sampling:
+    tau: 0.1
+    transitions_per_state: 5000
+    # Provisional definition of the easy sampled regime.
+    easy_rho: 0.05
+    easy_delta: 0.1
+
+gates:
+  overrides:
+    mechanical: null
+    coarse: null
+    functional: null
+    synthetic_exact: null
+    synthetic: null
+    confirmation: null
+    real_algebra: null
+  mechanical:
+    roundtrip_relative_rms_max: 1.0e-6
+    jvp_median_relative_error_max: 0.01
+    jvp_p95_relative_error_max: 0.05
+  coarse:
+    required_passing_sentinel_cuts: 2
+    require_nonfinal_cut: true
+    confidence: 0.95
+    shifted_null_percentile: 0.95
+  functional:
+    required_passing_cuts: 2
+    confidence: 0.95
+    require_lower_damage_than_every_control: true
+    kappa_max: 1.0
+    require_higher_clean_cell_recovery: true
+    primary_direction: empirical_chord
+  synthetic:
+    noiseless_instances: 20
+    exact_tuple_recovery_fraction_min: 1.0
+    relative_support_error_max: 1.0e-8
+    easy_sampled_median_ami_min: 0.9
+    null_false_positives_max: 5
+    null_instances: 100
+  confirmation:
+    training_seeds: [0, 1, 2]
+    required_passing_cuts: 2
+    confidence: 0.95
+    require_same_cuts: true
+    require_same_effect_direction: true
+    replication_unit: training_seed
+  real_algebra:
+    null_false_positive_rate_max: 0.05
+    confidence: 0.95
+    require_positive_heldout_compression: true
+    calibration_suite: synthetic_and_unfactored_nulls
+
+report:
+  output: reports/voronoi_lab.html
+  mockup_output: reports/MOCKUP/voronoi_lab_MOCKUP.html
+  self_contained: true
+  embed_spec: true

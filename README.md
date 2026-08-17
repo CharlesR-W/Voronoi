@@ -1,9 +1,11 @@
 # Voronoi Residual Computation Lab
 
-> **Status: design only.** This repository currently contains a research
-> write-up and proposed experiments, not empirical evidence. No model has been
-> trained, no new analysis has been run, and no dashboard or mock result has
-> been built here.
+> **Status: infrastructure and bounded validation implemented; scientific
+> phenomenon runs remain unrun.** The repository now contains a strict stage
+> DAG, immutable artifacts and run receipts, a hash-pinned Tracking2 adapter,
+> deterministic probe banks, mechanical checks, a tiny exact synthetic subgate,
+> and a self-contained `MOCKUP` report. These implementation validations are not
+> evidence that residual candidate cells form, snap, recover, or factor.
 
 This project asks whether continuous residual computation admits a useful
 finite-state description and, if it does, whether the resulting transition
@@ -17,23 +19,45 @@ ask whether that computation factors.
 
 ## Start here
 
-The next non-code task is to identify and archive the primary papers behind the
-motivating “activation plateau” and sharp-boundary reports. That audit can run
-in parallel with generic mechanical tests, but it must finish before the project
-freezes a literature-matched plateau definition or makes any replication claim.
+Install the locked environment and inspect the dependency-closed plan:
 
-The first code tasks, if approved, are (i) the mechanical checks and coarse
-five-checkpoint pass for Experiment 1 and (ii) the oracle-coordinate unit checks
-for Experiment 2. They do not require an overnight sweep.
+```bash
+uv sync --all-extras
+.venv/bin/voronoi-lab validate --inputs --json
+.venv/bin/voronoi-lab plan --json
+```
+
+The currently runnable scientific-validation targets are
+`gate.mechanical` and `gate.synthetic_exact`; `report.build` creates only the
+visibly watermarked schematic. Every successful `run` publishes an immutable,
+database-independent receipt and prints its artifact ID. For example:
+
+```bash
+.venv/bin/voronoi-lab run --until gate.mechanical --json
+.venv/bin/voronoi-lab run --until gate.synthetic_exact --json
+.venv/bin/voronoi-lab run --stage report.build --json
+```
+
+The next scientific prerequisite is still to identify and archive the primary
+papers behind the motivating “activation plateau” and sharp-boundary reports.
+That audit must finish before the project freezes a literature-matched plateau
+definition or makes any replication claim.
 
 Current inputs are local-only and are **not clone-safe**:
 
 - the ResNet definition, configuration, checkpoints, and transplant artifact
   are in the sibling `../Experiments/Tracking2/` project; their presence was
   verified locally on 2026-08-16, but they are not vendored here; and
-- the two mathematical notes listed under [Source status](#source-status) are
-  still in `~/Downloads/` and must be copied or otherwise archived before a
-  portable implementation begins.
+- the two mathematical design notes are archived under `references/notes/`
+  with hashes listed in `references/README.md`; they are proposals, not
+  empirical sources.
+
+The infrastructure boundary is deliberate. Runnable stages use strict,
+versioned payload schemas, semantic seed namespaces, content-addressed objects,
+cross-run caching, explicit gate rules and authorizations, source-drift checks,
+shard-level recovery for the exact synthetic gate, and append-only run receipts.
+The formation, boundary, snapping, three-seed confirmation, sampled recovery,
+and real-algebra stages remain `PLANNED` and cannot be accidentally executed.
 
 The intended dependency is:
 
@@ -384,9 +408,12 @@ repeat across independently trained seeds before it receives much weight.
 
 ### Experiment 1 gates
 
-1. **Mechanical gate.** Verify train/test isolation, deterministic probe banks,
-   zero-intervention parity, native-space centroid reconstruction, synthetic
-   mixture/Gaussian behavior, and JVP versus finite-difference agreement.
+1. **Mechanical gate.** Verify distinct hash-pinned train/test source files,
+   deterministic probe banks, zero-intervention parity, native-space centroid
+   reconstruction, synthetic mixture/Gaussian behavior, and JVP versus
+   finite-difference agreement. Distinct paths and whole-file hashes do not by
+   themselves prove absence of row-level overlap, so this bounded gate does not
+   claim a sample-level leakage audit.
 2. **Coarse phenomenon gate.** Reuse the read-only seed-0 checkpoints at epochs
    0, 1, 5, 20, and 100. Measure static geometry at all eight cuts and functional
    paths at four sentinel cuts. Produce only a five-frame diagnostic animation.
@@ -758,11 +785,13 @@ experiments.
 
 ## Dashboard and animation specification
 
-When implementation begins, the deliverable should be one self-contained HTML
-report that embeds its specification and provenance. Before measured data
-exist, every schematic panel must be visibly marked `MOCKUP`, include an
-interpretation guide, and state what observation would weaken the hypothesis.
-No mock dashboard is being built in the current design pass.
+The implemented report builder produces one self-contained HTML document that
+embeds this specification. Its current payload is deterministic schematic data:
+every scientific section and plot is visibly marked `MOCKUP`, includes an
+interpretation guide, and states what would weaken the hypothesis. The CLI
+intentionally rejects `--mode real`; measured reporting will be enabled only
+after a typed report-payload artifact is assembled from verified run receipts
+and gate outputs. Thus an arbitrary local JSON file cannot self-assert evidence.
 
 Planned views are:
 
@@ -838,15 +867,20 @@ Stop or narrow the language at each failure:
   symmetry evidence; and
 - no compression of held-out transitions: report no useful factorization.
 
-## Immediate scope and unresolved choices
+## Implemented scope and unresolved choices
 
-This design pass intentionally stops before scaffolding code, downloading data,
-running checkpoints, or rendering a dashboard. The next implementation step,
-if approved, is the mechanical Experiment 1 gate plus the exact-label unit
-checks for Experiment 2—not an overnight full sweep.
+The implementation currently stops at infrastructure, input/probe
+materialization, bounded Experiment 1 mechanics, and the tiny-state exact
+Experiment 2 subgate. It does **not** run the five-checkpoint formation analysis,
+the coarse or functional phenomenon gates, confirmation training, sampled
+synthetic recovery, or real algebra. Those stages remain visible in the DAG as
+`PLANNED`, with typed configuration placeholders where choices are sufficiently
+specified. `protocol.mode: confirmatory` is rejected until a future schema can
+bind it to a preregistered full-protocol hash.
 
-Three author choices remain consequential, although the README has adopted
-conservative defaults so work can proceed:
+Several author choices remain consequential, although the exploratory pilot
+configuration uses explicit provisional defaults so infrastructure work can
+proceed:
 
 - “activation plateau” may refer in the motivating literature to a different
   object than sitewise residual states; the exact papers and definition still
@@ -859,14 +893,16 @@ conservative defaults so work can proceed:
 ## Source status
 
 This write-up was developed from the project description and two local notes,
-read in full:
+read in full and archived here:
 
-- `~/Downloads/Approximate Symmetry for Computation_ A Short Operator-Algebra Tutorial.md`
-- `~/Downloads/Approximate Factorization of Voronoi-Quantized Residual Computation.md`
+- [`references/notes/approximate-symmetry-operator-algebra.md`](references/notes/approximate-symmetry-operator-algebra.md)
+- [`references/notes/approximate-factorization-voronoi-residual.md`](references/notes/approximate-factorization-voronoi-residual.md)
 
 Those notes provide mathematical proposals, not empirical findings. The
 motivating plateau/boundary literature has not yet been audited in this
 repository, so this README deliberately makes no citation-dependent literature
 claims.
 
-Initial specification drafted collaboratively by CRW and Codex on 2026-08-16.
+Initial specification drafted collaboratively by CRW and Codex on 2026-08-16;
+the infrastructure implementation and status audit were completed on
+2026-08-17.

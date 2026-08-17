@@ -1,0 +1,79 @@
+schema_version: 1
+name: tracking2-seed0-resnet18v2
+lineage_quality: exploratory_legacy
+lineage_note: >-
+  Local historical pilot with no source-revision, dataset-fingerprint, or checkpoint-hash
+  manifest from the producing run; suitable only for the preregistered exploratory coarse gate.
+root: ../Experiments/Tracking2
+observed_repository_revision: c812268a0d1f5404cc658eaaba1e8929c2da229a
+read_only: true
+
+architecture:
+  module: tracking2.models
+  class_name: InstrumentedResNet18V2
+  width: 64
+  num_classes: 10
+  source:
+    path: src/tracking2/models.py
+    size_bytes: 13081
+    sha256: f43c076edb9b0b95b65f5d73747211f7bab72f3076f740fb8be0823ecc7709d9
+  state_dict_tensors: 42
+  state_dict_parameters: 11169162
+  state_dict_dtype: float32
+
+training:
+  seed: 0
+  train_size: 50000
+  test_size: 10000
+  epochs: 100
+  batch_size: 128
+  learning_rate: 0.05
+  weight_decay: 0.0
+  checkpoint_epochs: [0, 1, 5, 20, 100]
+  lr_milestones: [30, 60, 90]
+  width: 64
+  device: cuda
+  amp: true
+  target_epoch: 100
+
+checkpoints:
+  - epoch: 0
+    path: artifacts/resnet_criticality/seed0/checkpoint_epoch0.pt
+    size_bytes: 44689764
+    sha256: 8874806882634b1fb7a6df8895044dda1ba5e5470b8040b7235352208a7ffc40
+  - epoch: 1
+    path: artifacts/resnet_criticality/seed0/checkpoint_epoch1.pt
+    size_bytes: 44689764
+    sha256: 27587a1db527dfe462e3cfaea0ffb92a7e7ac6c1d35c75fe36c51630a8a03abe
+  - epoch: 5
+    path: artifacts/resnet_criticality/seed0/checkpoint_epoch5.pt
+    size_bytes: 44689764
+    sha256: deb6ecef38708e5a6e9826b6d9ce4f715258f0856a6a40cb518a1e872c693fbe
+  - epoch: 20
+    path: artifacts/resnet_criticality/seed0/checkpoint_epoch20.pt
+    size_bytes: 44689810
+    sha256: 3671cd54e5b2340b2e0d11137f1e9594bf6a06da16403ff939f7f539a38b171b
+  - epoch: 100
+    path: artifacts/resnet_criticality/seed0/checkpoint_epoch100.pt
+    size_bytes: 44689856
+    sha256: 5b0a37f599d364c159e6d547d9b992fcb5614c8456abf30c2e78fffa0d566178
+
+datasets:
+  backend: parquet
+  train:
+    path: data/cifar10-train.parquet
+    size_bytes: 119705255
+    sha256: 8428b53a88a11ac374111006708df51469e315a22ac6d66470afd9c78d2ae883
+  test:
+    path: data/cifar10-test.parquet
+    size_bytes: 23940850
+    sha256: 841389e6f2d64f28bf17310e430aebac20ec3ba611a3c5e231dc93c645ce84de
+
+transplant:
+  schema_version: 1
+  experiment: resnet18_block_criticality
+  status: MEASURED
+  file:
+    path: artifacts/resnet_criticality/seed0/resnet_criticality.json
+    size_bytes: 17215
+    sha256: 1c984ebbbe5d438aae1b8b7c28ef1e84a76309dd46872073ba28283db122d5dd

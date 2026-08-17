@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime products are reproducible from configs and immutable manifests.
+artifacts/objects/
+artifacts/.staging/
+runs/
+reports/*
+!artifacts/README.md
+!reports/README.md
+!reports/MOCKUP/
+reports/MOCKUP/*
+!reports/MOCKUP/.gitkeep

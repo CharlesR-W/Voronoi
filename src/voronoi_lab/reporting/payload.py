@@ -1,0 +1,631 @@
+"""Strict saved-payload contract for mock and measured research reports.
+
+The report builder consumes only this schema and the embedded README. It does not
+import model, training, checkpoint, or experiment-runner modules.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Annotated, Literal
+
+import numpy as np
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+
+from .io import atomic_write_text
+
+OKABE_ITO: dict[str, str] = {
+    "black": "#000000",
+    "blue": "#0072B2",
+    "green": "#009E73",
+    "orange": "#E69F00",
+    "purple": "#CC79A7",
+    "sky": "#56B4E9",
+    "vermillion": "#D55E00",
+    "yellow": "#F0E442",
+}
+
+ColorKey = Literal["black", "blue", "green", "orange", "purple", "sky", "vermillion", "yellow"]
+DashStyle = Literal["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"]
+EvidenceStatus = Literal["MOCKUP", "PLANNED", "UNRUN", "DIAGNOSTIC", "MEASURED"]
+ExperimentKey = Literal["formation", "snapping", "synthetic", "real_algebra"]
+
+
+def _require_true(value: bool) -> bool:
+    if value is not True:
+        raise ValueError("value must be true")
+    return value
+
+
+StrictTrue = Annotated[bool, Field(strict=True), AfterValidator(_require_true)]
+VersionOne = Annotated[int, Field(ge=1, le=1, strict=True)]
+
+
+class PayloadModel(BaseModel):
+    """Strict finite-data base model suitable for direct JSON embedding."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+
+class VisualGrammar(PayloadModel):
+    sequential_scale: Literal["Cividis"] = "Cividis"
+    categorical_palette: Literal["Okabe-Ito"] = "Okabe-Ito"
+    line_styles: tuple[DashStyle, ...] = ("solid", "dash", "dot", "dashdot")
+    comparable_scales_fixed: StrictTrue = True
+
+
+class LineSeries(PayloadModel):
+    name: str = Field(min_length=1)
+    color_key: ColorKey
+    dash: DashStyle
+    y: tuple[float | None, ...]
+
+
+class LinePlot(PayloadModel):
+    kind: Literal["line"] = "line"
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    title: str = Field(min_length=1)
+    x_label: str = Field(min_length=1)
+    y_label: str = Field(min_length=1)
+    x: tuple[float, ...]
+    series: tuple[LineSeries, ...]
+    x_range: tuple[float, float]
+    y_range: tuple[float, float]
+    takeaway: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_shape_and_scales(self) -> LinePlot:
+        if len(self.x) < 2:
+            raise ValueError("line plots require at least two x values")
+        if not self.series:
+            raise ValueError("line plots require at least one series")
+        if any(len(series.y) != len(self.x) for series in self.series):
+            raise ValueError("every line series must match the x-axis length")
+        if self.x_range[0] >= self.x_range[1] or self.y_range[0] >= self.y_range[1]:
+            raise ValueError("line plot ranges must be strictly increasing")
+        return self
+
+
+class HeatmapPlot(PayloadModel):
+    kind: Literal["heatmap"] = "heatmap"
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    title: str = Field(min_length=1)
+    x_label: str = Field(min_length=1)
+    y_label: str = Field(min_length=1)
+    colorbar_label: str = Field(min_length=1)
+    x_labels: tuple[str, ...]
+    y_labels: tuple[str, ...]
+    z: tuple[tuple[float | None, ...], ...]
+    z_range: tuple[float, float]
+    colorscale: Literal["Cividis"] = "Cividis"
+    takeaway: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_grid_and_scale(self) -> HeatmapPlot:
+        if not self.x_labels or not self.y_labels:
+            raise ValueError("heatmaps require non-empty axes")
+        if len(self.z) != len(self.y_labels) or any(
+            len(row) != len(self.x_labels) for row in self.z
+        ):
+            raise ValueError("heatmap z dimensions must match its labeled axes")
+        if self.z_range[0] >= self.z_range[1]:
+            raise ValueError("heatmap z_range must be strictly increasing")
+        return self
+
+
+PlotPayload = Annotated[LinePlot | HeatmapPlot, Field(discriminator="kind")]
+
+
+class InterpretationGuide(PayloadModel):
+    supports: str = Field(min_length=1)
+    weakens: str = Field(min_length=1)
+
+
+class ExperimentSection(PayloadModel):
+    key: ExperimentKey
+    title: str = Field(min_length=1)
+    question: str = Field(min_length=1)
+    status: EvidenceStatus
+    status_detail: str = Field(min_length=1)
+    motivation: str = Field(min_length=1)
+    equation: str = Field(min_length=1)
+    equation_where: str = Field(min_length=1)
+    methodology: tuple[str, ...] = Field(min_length=1)
+    guide: InterpretationGuide
+    plots: tuple[PlotPayload, ...] = Field(min_length=1)
+    takeaway: str = Field(min_length=1)
+    caveat: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_unique_plot_keys(self) -> ExperimentSection:
+        keys = [plot.key for plot in self.plots]
+        if len(keys) != len(set(keys)):
+            raise ValueError("plot keys must be unique within an experiment")
+        return self
+
+
+class OverviewPayload(PayloadModel):
+    question: str = Field(min_length=1)
+    current_answer: str = Field(min_length=1)
+    status: EvidenceStatus
+    central_equation: str = Field(min_length=1)
+    equation_where: str = Field(min_length=1)
+    experiment_map: tuple[str, ...] = Field(min_length=1)
+    caveats: tuple[str, ...] = Field(min_length=1)
+
+
+class ProvenancePayload(PayloadModel):
+    payload_source: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    config_hash: str = Field(min_length=1)
+    seeds: tuple[int, ...]
+    artifact_ids: tuple[str, ...]
+    warnings: tuple[str, ...]
+
+
+class ReportPayload(PayloadModel):
+    schema_version: VersionOne = 1
+    mode: Literal["mockup", "real"]
+    overview: OverviewPayload
+    experiments: tuple[ExperimentSection, ...]
+    visual_grammar: VisualGrammar = Field(default_factory=VisualGrammar)
+    provenance: ProvenancePayload
+
+    @model_validator(mode="after")
+    def enforce_complete_report_and_evidence_labels(self) -> ReportPayload:
+        expected = ("formation", "snapping", "synthetic", "real_algebra")
+        actual = tuple(experiment.key for experiment in self.experiments)
+        if actual != expected:
+            raise ValueError(f"experiments must appear exactly in overview order {expected}")
+        plot_keys = [plot.key for experiment in self.experiments for plot in experiment.plots]
+        if len(plot_keys) != len(set(plot_keys)):
+            raise ValueError("plot keys must be unique across the report")
+        if self.mode == "mockup":
+            if self.overview.status != "MOCKUP" or any(
+                experiment.status != "MOCKUP" for experiment in self.experiments
+            ):
+                raise ValueError("mock payloads must label every scientific section MOCKUP")
+            titles = [experiment.title for experiment in self.experiments]
+            titles.extend(
+                plot.title for experiment in self.experiments for plot in experiment.plots
+            )
+            if any("MOCKUP" not in title for title in titles):
+                raise ValueError("every mock experiment and plot title must contain MOCKUP")
+        elif self.overview.status == "MOCKUP" or any(
+            experiment.status == "MOCKUP" for experiment in self.experiments
+        ):
+            raise ValueError("real payloads cannot carry MOCKUP evidence labels")
+        elif any(
+            "MOCKUP" in title
+            for experiment in self.experiments
+            for title in (experiment.title, *(plot.title for plot in experiment.plots))
+        ):
+            raise ValueError("real payload experiment and plot titles cannot contain MOCKUP")
+        return self
+
+
+def _round(values: np.ndarray) -> tuple[float, ...]:
+    return tuple(float(value) for value in np.round(values, 5))
+
+
+def make_mock_payload(seed: int = 20260816) -> ReportPayload:
+    """Create deterministic schematic data using the real report schema."""
+
+    rng = np.random.default_rng(seed)
+    checkpoints = ("0", "1", "5", "20", "100")
+    cuts = ("stage 1", "stage 2", "stage 3", "stage 4")
+    base_distortion = np.array(
+        [
+            [0.86, 0.81, 0.69, 0.52, 0.38],
+            [0.88, 0.82, 0.66, 0.47, 0.32],
+            [0.90, 0.84, 0.70, 0.50, 0.35],
+            [0.91, 0.87, 0.76, 0.59, 0.43],
+        ]
+    )
+    distortion = np.clip(base_distortion + rng.normal(0.0, 0.006, base_distortion.shape), 0, 1)
+
+    alpha = np.array([0.0, 0.25, 0.5, 1.0])
+    snap = np.clip(np.array([0.0, 0.012, 0.025, 0.055]) + rng.normal(0, 0.001, 4), 0, None)
+    random_control = np.clip(np.array([0.0, 0.035, 0.09, 0.24]) + rng.normal(0, 0.002, 4), 0, None)
+    away_control = np.clip(np.array([0.0, 0.055, 0.15, 0.39]) + rng.normal(0, 0.002, 4), 0, None)
+
+    rho_values = np.array([0.0, 0.05, 0.2, 0.5])
+    delta_values = np.array([0.0, 0.1, 0.5, 1.0])
+    recovery = np.empty((delta_values.size, rho_values.size), dtype=np.float64)
+    for row, delta in enumerate(delta_values):
+        recovery[row] = np.exp(-1.9 * rho_values) * (1.0 - 0.08 * delta)
+    recovery = np.clip(recovery + rng.normal(0, 0.006, recovery.shape), 0, 1)
+
+    ranks = np.arange(1, 13, dtype=np.float64)
+    candidate_spectrum = np.clip(0.035 * ranks**1.25, 0, 1)
+    null_spectrum = np.clip(0.22 + 0.065 * ranks, 0, 1)
+
+    experiments = (
+        ExperimentSection(
+            key="formation",
+            title="Do stable candidate cells emerge through training? — MOCKUP",
+            question=(
+                "Do held-out residual states become more compact, stable, and functionally aligned "
+                "with fitted cell boundaries as training proceeds?"
+            ),
+            status="MOCKUP",
+            status_detail=(
+                "Schematic values only; no checkpoint geometry or intervention output "
+                "is represented."
+            ),
+            motivation=(
+                "A fitted Voronoi codebook is automatic. The scientific burden is to show held-out "
+                "compression and boundary-aligned sensitivity beyond matched Gaussian controls."
+            ),
+            equation=(
+                r"D_{t,\ell,K}="
+                r"\frac{\mathbb E\|z-\mu_{q(z)}\|_2^2}"
+                r"{\mathbb E\|z-\bar z\|_2^2}"
+            ),
+            equation_where=(
+                "$z$ is a standardized sitewise residual state and $q(z)$ is its "
+                "nearest fitted centroid."
+            ),
+            methodology=(
+                "Fit codebooks only on the declared training bank and score geometry "
+                "on held-out images.",
+                "Compare fixed K values and raw versus standardized metrics against "
+                "moment-matched nulls.",
+                "Resample images, never spatial tokens; keep plot scales fixed across "
+                "checkpoints and cuts.",
+            ),
+            guide=InterpretationGuide(
+                supports=(
+                    "Lower held-out distortion together with stable assignments and "
+                    "boundary enrichment "
+                    "supports a useful finite-state description."
+                ),
+                weakens=(
+                    "No advantage over Gaussian nulls, or sensitivity confined to "
+                    "off-cloud directions, "
+                    "weakens the cell interpretation."
+                ),
+            ),
+            plots=(
+                HeatmapPlot(
+                    key="formation_distortion",
+                    title="Held-out normalized distortion across training — MOCKUP",
+                    x_label="checkpoint epoch",
+                    y_label="sentinel residual cut",
+                    colorbar_label="$D_{t,\\ell,K}$",
+                    x_labels=checkpoints,
+                    y_labels=cuts,
+                    z=tuple(tuple(float(value) for value in row) for row in distortion),
+                    z_range=(0.0, 1.0),
+                    takeaway=(
+                        "MOCKUP reading: darker late cells would indicate lower normalized "
+                        "distortion; "
+                        "the real plot must include null comparisons before supporting a claim."
+                    ),
+                ),
+            ),
+            takeaway=(
+                "No result yet. This panel specifies the held-out geometry comparison "
+                "required by the coarse gate."
+            ),
+            caveat=(
+                "Compact clusters alone do not establish plateaus, contraction, or "
+                "discrete computation."
+            ),
+        ),
+        ExperimentSection(
+            key="snapping",
+            title="Does centroid snapping preserve computation? — MOCKUP",
+            question=(
+                "Does moving a residual state toward its clean assigned centroid preserve "
+                "predictions better "
+                "than equal-norm control displacements?"
+            ),
+            status="MOCKUP",
+            status_detail="Schematic dose-response curves only; the functional gate remains unrun.",
+            motivation=(
+                "Snapping is a causal sufficiency test: tolerance is informative only "
+                "when the same displacement "
+                "in generic or adverse directions causes more damage."
+            ),
+            equation=r"z^{(\alpha)}=z+\alpha\bigl(\mu_{q(z)}-z\bigr)",
+            equation_where=(
+                r"$\alpha$ is the snap dose and the clean assignment $q(z)$ is held "
+                "fixed throughout the intervention."
+            ),
+            methodology=(
+                "Insert displacements in native activation tensors after defining norms "
+                "in standardized coordinates.",
+                "Compare snap, random, away-from-centroid, other-centroid, and identity "
+                "interventions at equal norm.",
+                "Use paired image bootstrap intervals and test both sparse-token and "
+                "spatially coherent support.",
+            ),
+            guide=InterpretationGuide(
+                supports=(
+                    "A snap curve below every equal-norm control, together with gain below "
+                    "one and downstream-cell "
+                    "recovery, supports finite-state sufficiency."
+                ),
+                weakens=(
+                    "Overlapping curves suggest generic smoothness; damage from snapping "
+                    "rejects centroid sufficiency."
+                ),
+            ),
+            plots=(
+                LinePlot(
+                    key="snapping_damage",
+                    title="Predictive damage versus intervention dose — MOCKUP",
+                    x_label="snap/control dose $\\alpha$",
+                    y_label="predictive KL from clean output",
+                    x=_round(alpha),
+                    series=(
+                        LineSeries(
+                            name="toward centroid", color_key="blue", dash="solid", y=_round(snap)
+                        ),
+                        LineSeries(
+                            name="random equal norm",
+                            color_key="orange",
+                            dash="dash",
+                            y=_round(random_control),
+                        ),
+                        LineSeries(
+                            name="away from centroid",
+                            color_key="vermillion",
+                            dash="dot",
+                            y=_round(away_control),
+                        ),
+                    ),
+                    x_range=(0.0, 1.0),
+                    y_range=(0.0, 0.45),
+                    takeaway=(
+                        "MOCKUP reading: a lower solid blue curve would favor snapping "
+                        "over norm-matched controls."
+                    ),
+                ),
+            ),
+            takeaway=(
+                "No result yet. The separation shown here is an interpretation "
+                "schematic, not evidence."
+            ),
+            caveat=(
+                "Tolerance to an intervention does not show that the unperturbed network "
+                "performs snapping."
+            ),
+        ),
+        ExperimentSection(
+            key="synthetic",
+            title="Can hidden product coordinates be recovered when truth is known? — MOCKUP",
+            question=(
+                "Can a shared relabeling recover planted factors and low-order generator "
+                "components as interaction, "
+                "symmetry breaking, and finite sampling are varied independently?"
+            ),
+            status="MOCKUP",
+            status_detail=(
+                "Schematic sweep only; it does not display the local 20-instance "
+                "exact-gate execution."
+            ),
+            motivation=(
+                "Real factor discovery remains blocked unless the method first succeeds "
+                "on arbitrarily relabeled "
+                "finite systems where coordinates, interactions, and symmetries are known."
+            ),
+            equation=r"J(\pi)=\sum_{\alpha,S}\lambda_{|S|}\|\mathsf P_S^\pi(L_\alpha)\|_F^2",
+            equation_where=(
+                r"$\pi$ is a shared state labeling and $\mathsf P_S^\pi$ is the "
+                "exact-support Hilbert--Schmidt projection."
+            ),
+            methodology=(
+                r"Use exact column-convention generators first, with independent knobs "
+                r"$\rho$ and $\delta$.",
+                "Select coordinates on training primitives and score held-out primitives "
+                "after refitting coefficients.",
+                "Align recovery only up to local label permutations and permutations of "
+                "equal-sized factors.",
+            ),
+            guide=InterpretationGuide(
+                supports=(
+                    "High aligned tuple recovery at low interaction, graceful degradation, "
+                    "and no positives on "
+                    "unfactored nulls support use of the method."
+                ),
+                weakens=(
+                    "Unstable labels, failure in the exact $(2,3)$ case, or confident "
+                    "structure on nulls blocks real use."
+                ),
+            ),
+            plots=(
+                HeatmapPlot(
+                    key="synthetic_recovery",
+                    title="Aligned tuple recovery over interaction and symmetry breaking — MOCKUP",
+                    x_label="pair interaction knob $\\rho$",
+                    y_label="symmetry-breaking knob $\\delta$",
+                    colorbar_label="aligned tuple recovery",
+                    x_labels=tuple(str(value) for value in rho_values),
+                    y_labels=tuple(str(value) for value in delta_values),
+                    z=tuple(tuple(float(value) for value in row) for row in recovery),
+                    z_range=(0.0, 1.0),
+                    takeaway=(
+                        "MOCKUP reading: uniformly bright low-interaction columns would "
+                        "indicate robust coordinate "
+                        "recovery; scales remain fixed over the complete sweep."
+                    ),
+                ),
+            ),
+            takeaway="No sweep result yet. Exact and sampled gates must be reported separately.",
+            caveat=(
+                "Large interactions or indistinguishable primitive families can make "
+                "the labeling genuinely non-identifiable."
+            ),
+        ),
+        ExperimentSection(
+            key="real_algebra",
+            title="Do validated real transitions contain stable algebraic structure? — MOCKUP",
+            question=(
+                "Only after both preceding gates pass, do held-out real transition "
+                "operators exhibit stable low-commutator directions or factor-coordinate "
+                "compression beyond sampling-matched nulls?"
+            ),
+            status="MOCKUP",
+            status_detail=(
+                "Conditional schematic only; real algebra analysis is blocked until "
+                "geometry and synthetic gates pass."
+            ),
+            motivation=(
+                "A low commutator spectrum can reflect symmetry, duplicated states, or "
+                "undersampling. Held-out stability "
+                "and null-calibrated compression distinguish useful structure from degeneracy."
+            ),
+            equation=r"\mathcal C(X)=\bigl([X,L_1],\ldots,[X,L_m]\bigr)",
+            equation_where=(
+                "$X$ is a normalized non-scalar candidate operator; low singular values "
+                "indicate low commutator energy."
+            ),
+            methodology=(
+                "Project out the scalar identity and common kernel/cokernel artifacts "
+                "before interpreting modes.",
+                "Fit on declared contexts, evaluate held-out primitives, and bootstrap "
+                "transitions rather than tokens.",
+                "Calibrate detection thresholds on dense and block-structured null suites "
+                "before inspecting real outputs.",
+            ),
+            guide=InterpretationGuide(
+                supports=(
+                    "Several stable low modes below the null spectrum, plus positive "
+                    "held-out compression, support useful structure."
+                ),
+                weakens=(
+                    "Modes that disappear under resampling or match nulls provide no "
+                    "evidence for a real symmetry or factorization."
+                ),
+            ),
+            plots=(
+                LinePlot(
+                    key="real_commutator",
+                    title="Normalized non-scalar commutator spectrum — MOCKUP",
+                    x_label="non-scalar singular-mode rank",
+                    y_label="normalized singular value",
+                    x=_round(ranks),
+                    series=(
+                        LineSeries(
+                            name="candidate transitions",
+                            color_key="blue",
+                            dash="solid",
+                            y=_round(candidate_spectrum),
+                        ),
+                        LineSeries(
+                            name="sampling-matched null",
+                            color_key="orange",
+                            dash="dash",
+                            y=_round(null_spectrum),
+                        ),
+                    ),
+                    x_range=(1.0, 12.0),
+                    y_range=(0.0, 1.0),
+                    takeaway=(
+                        "MOCKUP reading: reproducible low blue modes below the dashed "
+                        "null would motivate candidate inspection."
+                    ),
+                ),
+            ),
+            takeaway=(
+                "No real-algebra result exists; this tab remains a visibly conditional target."
+            ),
+            caveat=(
+                "A low mode is an operator direction, not automatically an invertible, "
+                "unitary, or permutation symmetry."
+            ),
+        ),
+    )
+
+    return ReportPayload(
+        mode="mockup",
+        overview=OverviewPayload(
+            question=(
+                "When, if ever, does continuous residual computation admit a stable "
+                "finite-state description "
+                "whose transitions have recoverable symmetries or product coordinates?"
+            ),
+            current_answer=(
+                "No empirical answer yet. This MOCKUP encodes the gated evidence "
+                "structure and expected readings "
+                "without presenting schematic values as results."
+            ),
+            status="MOCKUP",
+            central_equation=(
+                r"\text{held-out cells}\;\land\;\text{functional fidelity}\;\land\;"
+                r"\text{synthetic recovery}\;\Longrightarrow\;\text{real algebra screen}"
+            ),
+            equation_where=(
+                "Each conjunction is a gate: later algebraic interpretation is blocked "
+                "when an earlier validation fails."
+            ),
+            experiment_map=(
+                "Formation: held-out geometry and boundary alignment",
+                "Snapping/recovery: causal sufficiency against matched controls",
+                "Synthetic recovery: known-factor and symmetry validation",
+                "Conditional real algebra: null-calibrated held-out structure",
+            ),
+            caveats=(
+                "A fitted Voronoi partition is a definition, not evidence for discrete "
+                "computation.",
+                "Factorization and commutant symmetry are parallel, non-equivalent tests.",
+                "Every schematic trace is watermarked and uses the same schema intended "
+                "for measured data.",
+            ),
+        ),
+        experiments=experiments,
+        provenance=ProvenancePayload(
+            payload_source="deterministic built-in interpretation mock",
+            run_id="MOCKUP-no-run",
+            config_hash="MOCKUP-no-config-hash",
+            seeds=(seed,),
+            artifact_ids=(),
+            warnings=(
+                "MOCKUP values are schematic and must not be cited as experiment output.",
+                "The motivating plateau/boundary literature audit remains incomplete.",
+            ),
+        ),
+    )
+
+
+def _reject_nonstandard_constant(token: str) -> None:
+    raise ValueError(f"saved report payload contains invalid JSON constant {token}")
+
+
+def _reject_duplicate_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"saved report payload contains duplicate key {key!r}")
+        result[key] = value
+    return result
+
+
+def load_payload(path: str | Path) -> ReportPayload:
+    """Load and strictly validate a finite saved JSON payload."""
+
+    raw = json.loads(
+        Path(path).read_text(encoding="utf-8"),
+        parse_constant=_reject_nonstandard_constant,
+        object_pairs_hook=_reject_duplicate_pairs,
+    )
+    return ReportPayload.model_validate(raw)
+
+
+def write_payload(payload: ReportPayload, path: str | Path) -> Path:
+    """Write stable standards-compliant JSON for artifact-based report rebuilding."""
+
+    return atomic_write_text(
+        path,
+        json.dumps(
+            payload.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n",
+    )
