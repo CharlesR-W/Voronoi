@@ -27,7 +27,6 @@ from voronoi_lab.pipeline import (
     DEFAULT_STAGES,
     ImplementationStatus,
     PipelineError,
-    stage_signature,
     validate_stage_output,
 )
 
@@ -52,25 +51,6 @@ def _small_config() -> LabConfig:
             "bootstrap": bootstrap,
         }
     )
-    exact_protocol = config.experiment2.exact_protocol.model_copy(
-        update={
-            "max_states": 4,
-            "random_relabel": True,
-            "generator_rate_shape": 3.0,
-            "exhaustive_tie_atol": 2e-10,
-            "exhaustive_tie_rtol": 3e-10,
-        }
-    )
-    experiment2 = config.experiment2.model_copy(
-        update={
-            "exact_instances": 2,
-            "exact_protocol": exact_protocol,
-            "oracle_factor_sizes": (2, 2),
-            "train_primitives": 4,
-            "unary_weight": 1.7,
-        }
-    )
-    synthetic_gate = config.gates.synthetic.model_copy(update={"noiseless_instances": 2})
     coarse_gate = config.gates.coarse.model_copy(update={"required_passing_sentinel_cuts": 1})
     functional_gate = config.gates.functional.model_copy(update={"required_passing_cuts": 1})
     confirmation_gate = config.gates.confirmation.model_copy(update={"required_passing_cuts": 1})
@@ -78,7 +58,6 @@ def _small_config() -> LabConfig:
         update={
             "coarse": coarse_gate,
             "functional": functional_gate,
-            "synthetic": synthetic_gate,
             "confirmation": confirmation_gate,
         }
     )
@@ -86,7 +65,6 @@ def _small_config() -> LabConfig:
     return config.model_copy(
         update={
             "experiment1": experiment1,
-            "experiment2": experiment2,
             "gates": gates,
             "runtime": runtime,
         }
@@ -118,21 +96,6 @@ def _context(tmp_path: Path, config: LabConfig, stage_name: str) -> StageContext
         project_root=tmp_path,
         source_identity=source_identity,
         stage_spec=DEFAULT_STAGES.get(stage_name),
-    )
-
-
-def _claim_parent(context: StageContext) -> None:
-    signature = stage_signature(
-        context.stage_spec,
-        context.config,
-        upstream_artifact_ids={},
-        source_identity=context.source_identity,
-    )
-    context.index.claim_stage(
-        context.run_id,
-        context.stage_spec.name,
-        signature,
-        owner_token="fixture-parent",
     )
 
 
@@ -524,7 +487,6 @@ def test_mechanical_gate_preserves_missing_metrics_but_fails_incomplete_jvp(tmp_
             "jvp_median_relative_error": None,
             "jvp_p95_relative_error": None,
         },
-        "synthetic_invariants": {"passed": True},
     }
     mechanical_ref = context.store.put_json(
         observations,
@@ -641,175 +603,6 @@ def test_mechanical_gate_contract_rejects_gate_observation_different_from_bound_
             store,
             config=config,
         )
-
-
-def test_configured_exact_handler_and_gate_pass_tiny_fixture(tmp_path) -> None:
-    config = _small_config()
-    exact_context = _context(tmp_path, config, "exp2.exact")
-    _claim_parent(exact_context)
-    exact_ref = stage_handlers.handle_exp2_exact(exact_context, {})
-    exact = exact_context.store.read_json(exact_ref.artifact_id, "exact.json")
-    assert exact["instances"] == 2
-    assert exact["density"] == config.experiment2.generator_density
-    assert exact["train_primitives"] == config.experiment2.train_primitives
-    assert exact["heldout_primitives"] == config.experiment2.heldout_primitives
-    assert exact["rho"] == config.experiment2.exact_protocol.rho
-    assert exact["factor_sizes"] == [2, 2]
-    assert exact["random_relabel"] is True
-    assert exact["unary_weight"] == 1.7
-    assert exact["generator_rate_shape"] == 3.0
-    assert exact["generator_connectivity_policy"] == "mandatory_directed_cycle"
-    assert exact["generator_normalization"] == "unit_mean_exit_rate"
-    assert exact["exhaustive_tie_atol"] == 2e-10
-    assert exact["exhaustive_tie_rtol"] == 3e-10
-    assert len(exact["ordered_instance_artifact_ids"]) == 2
-    reducer = exact_context.store.read_json(exact["reducer_artifact_id"], "shards.json")
-    assert [row["artifact_id"] for row in reducer["ordered_shards"]] == exact[
-        "ordered_instance_artifact_ids"
-    ]
-    assert [row["instance_index"] for row in exact["instance_results"]] == [0, 1]
-    assert all(row["observed_generator_family"] for row in exact["instance_results"])
-    first_shard = exact_context.store.read_json(
-        exact["ordered_instance_artifact_ids"][0], "instance.json"
-    )
-    assert first_shard["protocol"]["train_primitives"] == 4
-    assert first_shard["protocol"]["generator_rate_shape"] == 3.0
-    assert first_shard["protocol"]["exhaustive_tie_atol"] == 2e-10
-    assert first_shard["protocol"]["exhaustive_tie_rtol"] == 3e-10
-    assert first_shard["protocol"]["random_relabel"] is True
-
-    forged = dict(exact)
-    forged["exact_instances"] = 0
-    forged["exact_tuple_recovery_fraction"] = 0.0
-    forged["aggregate"] = {
-        **forged["aggregate"],
-        "exact_instances": 0,
-        "exact_tuple_recovery_fraction": 0.0,
-    }
-    forged_ref = exact_context.store.put_json(
-        forged,
-        filename="exact.json",
-        kind="stage/exp2-exact",
-        metadata=exact_ref.manifest.metadata,
-    )
-    with pytest.raises(PipelineError, match="aggregate does not match"):
-        validate_stage_output(
-            forged_ref,
-            exact_context.stage_spec,
-            exact_context.store,
-            config=config,
-        )
-
-    forged_evidence = copy.deepcopy(exact)
-    forged_row = forged_evidence["instance_results"][0]
-    forged_row["selected_labeling"][0], forged_row["selected_labeling"][1] = (
-        forged_row["selected_labeling"][1],
-        forged_row["selected_labeling"][0],
-    )
-    forged_row["selected_labeling_hash"] = canonical_hash(forged_row["selected_labeling"])
-    forged_row["exact"] = True
-    forged_row["train_support_error"] = 0.0
-    forged_row["heldout_support_error"] = 0.0
-    forged_evidence_ref = exact_context.store.put_json(
-        forged_evidence,
-        filename="exact.json",
-        kind="stage/exp2-exact",
-        metadata=exact_ref.manifest.metadata,
-    )
-    with pytest.raises(PipelineError, match="deterministic replay"):
-        validate_stage_output(
-            forged_evidence_ref,
-            exact_context.stage_spec,
-            exact_context.store,
-            config=config,
-        )
-
-    gate_context = _context(tmp_path, config, "gate.synthetic_exact")
-    gate_ref = stage_handlers.handle_gate_synthetic_exact(gate_context, {"exp2.exact": exact_ref})
-    gate = gate_context.store.read_json(gate_ref.artifact_id, "gate.json")
-    assert gate["status"] == GateStatus.PASS.value
-    assert (
-        validate_stage_output(
-            gate_ref,
-            gate_context.stage_spec,
-            gate_context.store,
-            config=config,
-        ).status
-        is GateStatus.PASS
-    )
-
-    forged_gate = copy.deepcopy(gate)
-    support = next(
-        check for check in forged_gate["checks"] if check["name"] == "support_component_error"
-    )
-    candidate = config.gates.synthetic.relative_support_error_max / 2
-    if candidate == support["observed"]:
-        candidate /= 2
-    support["observed"] = candidate
-    forged_gate_ref = gate_context.store.put_json(
-        forged_gate,
-        filename="gate.json",
-        kind="gate/synthetic-exact",
-        metadata=gate_ref.manifest.metadata,
-    )
-    with pytest.raises(PipelineError, match="does not match its bound upstream evidence"):
-        validate_stage_output(
-            forged_gate_ref,
-            gate_context.stage_spec,
-            gate_context.store,
-            config=config,
-        )
-
-
-def test_exact_handler_reuses_completed_instance_shards_on_parent_retry(
-    tmp_path, monkeypatch
-) -> None:
-    config = _small_config()
-    context = _context(tmp_path, config, "exp2.exact")
-    _claim_parent(context)
-    calls: list[dict[str, object]] = []
-    original = stage_handlers.run_oracle_exhaustive_instance
-
-    def counted(**kwargs):
-        calls.append(kwargs)
-        return original(**kwargs)
-
-    monkeypatch.setattr(stage_handlers, "run_oracle_exhaustive_instance", counted)
-    first = stage_handlers.handle_exp2_exact(context, {})
-    assert sorted(call["instance_index"] for call in calls) == [0, 1]
-    assert all(call["generator_rate_shape"] == 3.0 for call in calls)
-    assert all(call["exhaustive_tie_atol"] == 2e-10 for call in calls)
-    assert all(call["exhaustive_tie_rtol"] == 3e-10 for call in calls)
-    calls.clear()
-    second = stage_handlers.handle_exp2_exact(context, {})
-    assert calls == []
-    assert second.artifact_id == first.artifact_id
-    shards = [
-        record
-        for record in context.index.list_stages(context.run_id)
-        if record.metadata.get("parent_stage") == "exp2.exact"
-    ]
-    assert len(shards) == 2
-    assert all(record.attempts == 1 for record in shards)
-
-
-def test_exact_handler_workers_zero_is_strictly_sequential(tmp_path, monkeypatch) -> None:
-    config = _small_config()
-    experiment2 = config.experiment2.model_copy(update={"exact_instances": 1})
-    runtime = config.runtime.model_copy(update={"workers": 0})
-    config = config.model_copy(update={"experiment2": experiment2, "runtime": runtime})
-    context = _context(tmp_path, config, "exp2.exact")
-    _claim_parent(context)
-
-    class ForbiddenPool:
-        def __init__(self, *args, **kwargs) -> None:
-            raise AssertionError("workers=0 must not construct a thread pool")
-
-    monkeypatch.setattr(stage_handlers, "ThreadPoolExecutor", ForbiddenPool)
-    reference = stage_handlers.handle_exp2_exact(context, {})
-    exact = context.store.read_json(reference.artifact_id, "exact.json")
-    assert exact["instances"] == 1
-    assert len(exact["ordered_instance_artifact_ids"]) == 1
 
 
 def test_default_handlers_exactly_cover_runnable_default_stages() -> None:

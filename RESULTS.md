@@ -98,7 +98,9 @@ estimates are new hybrid diagnostics.
 The data are single-seed and use legacy checkpoint trajectories. Four centers per kind
 are enough to exercise and inspect the machinery, but not to establish a population
 effect. ResNet and VGG differ in more than their skip connections. No stable-cell,
-Voronoi, causal, or commutant claim should be inferred from this run.
+Voronoi, fissure, basin-commitment, flatness/plasticity, or causal claim should be
+inferred from this run. The all-MNIST integrated-Jacobian-barrier visualization is
+planned but has not been collected.
 
 See [artifacts/EXPERIMENT_1_DATA.md](artifacts/EXPERIMENT_1_DATA.md) for exact artifact
 IDs, child shards, replay fields, and verification commands.

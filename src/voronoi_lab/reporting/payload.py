@@ -29,7 +29,7 @@ OKABE_ITO: dict[str, str] = {
 ColorKey = Literal["black", "blue", "green", "orange", "purple", "sky", "vermillion", "yellow"]
 DashStyle = Literal["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"]
 EvidenceStatus = Literal["MOCKUP", "PLANNED", "UNRUN", "DIAGNOSTIC", "MEASURED"]
-ExperimentKey = Literal["formation", "snapping", "synthetic", "real_algebra"]
+ExperimentKey = Literal["formation", "snapping"]
 
 
 def _require_true(value: bool) -> bool:
@@ -190,7 +190,7 @@ class ReportPayload(PayloadModel):
 
     @model_validator(mode="after")
     def enforce_complete_report_and_evidence_labels(self) -> ReportPayload:
-        expected = ("formation", "snapping", "synthetic", "real_algebra")
+        expected = ("formation", "snapping")
         actual = tuple(experiment.key for experiment in self.experiments)
         if actual != expected:
             raise ValueError(f"experiments must appear exactly in overview order {expected}")
@@ -273,17 +273,6 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
     transplant_z = np.array([-0.8, -0.5, 0.1, 0.7, 1.1, 0.5, -0.2, -0.9])
     boundary_z = np.array([0.6, 0.2, -0.3, -0.7, -0.8, -0.1, 0.5, 0.9])
     contraction_z = np.array([0.7, 0.4, -0.1, -0.6, -0.9, -0.2, 0.4, 0.8])
-
-    rho_values = np.array([0.0, 0.05, 0.2, 0.5])
-    delta_values = np.array([0.0, 0.1, 0.5, 1.0])
-    recovery = np.empty((delta_values.size, rho_values.size), dtype=np.float64)
-    for row, delta in enumerate(delta_values):
-        recovery[row] = np.exp(-1.9 * rho_values) * (1.0 - 0.08 * delta)
-    recovery = np.clip(recovery + rng.normal(0, 0.006, recovery.shape), 0, 1)
-
-    ranks = np.arange(1, 13, dtype=np.float64)
-    candidate_spectrum = np.clip(0.035 * ranks**1.25, 0, 1)
-    null_spectrum = np.clip(0.22 + 0.065 * ranks, 0, 1)
 
     experiments = (
         ExperimentSection(
@@ -650,150 +639,6 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
             caveat=(
                 "Tolerance to an intervention does not show that the unperturbed network "
                 "performs snapping."
-            ),
-        ),
-        ExperimentSection(
-            key="synthetic",
-            title="Can hidden product coordinates be recovered when truth is known? — MOCKUP",
-            question=(
-                "Can a shared relabeling recover planted factors and low-order generator "
-                "components as interaction, "
-                "symmetry breaking, and finite sampling are varied independently?"
-            ),
-            status="MOCKUP",
-            status_detail=(
-                "Schematic sweep only; it does not display the local 20-instance "
-                "exact-gate execution."
-            ),
-            motivation=(
-                "Real factor discovery remains blocked unless the method first succeeds "
-                "on arbitrarily relabeled "
-                "finite systems where coordinates, interactions, and symmetries are known."
-            ),
-            equation=r"J(\pi)=\sum_{\alpha,S}\lambda_{|S|}\|\mathsf P_S^\pi(L_\alpha)\|_F^2",
-            equation_where=(
-                r"$\pi$ is a shared state labeling and $\mathsf P_S^\pi$ is the "
-                "exact-support Hilbert--Schmidt projection."
-            ),
-            methodology=(
-                r"Use exact column-convention generators first, with independent knobs "
-                r"$\rho$ and $\delta$.",
-                "Select coordinates on training primitives and score held-out primitives "
-                "after refitting coefficients.",
-                "Align recovery only up to local label permutations and permutations of "
-                "equal-sized factors.",
-            ),
-            guide=InterpretationGuide(
-                supports=(
-                    "High aligned tuple recovery at low interaction, graceful degradation, "
-                    "and no positives on "
-                    "unfactored nulls support use of the method."
-                ),
-                weakens=(
-                    "Unstable labels, failure in the exact $(2,3)$ case, or confident "
-                    "structure on nulls blocks real use."
-                ),
-            ),
-            plots=(
-                HeatmapPlot(
-                    key="synthetic_recovery",
-                    title="Aligned tuple recovery over interaction and symmetry breaking — MOCKUP",
-                    x_label="pair interaction knob $\\rho$",
-                    y_label="symmetry-breaking knob $\\delta$",
-                    colorbar_label="aligned tuple recovery",
-                    x_labels=tuple(str(value) for value in rho_values),
-                    y_labels=tuple(str(value) for value in delta_values),
-                    z=tuple(tuple(float(value) for value in row) for row in recovery),
-                    z_range=(0.0, 1.0),
-                    takeaway=(
-                        "MOCKUP reading: uniformly bright low-interaction columns would "
-                        "indicate robust coordinate "
-                        "recovery; scales remain fixed over the complete sweep."
-                    ),
-                ),
-            ),
-            takeaway="No sweep result yet. Exact and sampled gates must be reported separately.",
-            caveat=(
-                "Large interactions or indistinguishable primitive families can make "
-                "the labeling genuinely non-identifiable."
-            ),
-        ),
-        ExperimentSection(
-            key="real_algebra",
-            title="Do validated real transitions contain stable algebraic structure? — MOCKUP",
-            question=(
-                "Only after both preceding gates pass, do held-out real transition "
-                "operators exhibit stable low-commutator directions or factor-coordinate "
-                "compression beyond sampling-matched nulls?"
-            ),
-            status="MOCKUP",
-            status_detail=(
-                "Conditional schematic only; real algebra analysis is blocked until "
-                "geometry and synthetic gates pass."
-            ),
-            motivation=(
-                "A low commutator spectrum can reflect symmetry, duplicated states, or "
-                "undersampling. Held-out stability "
-                "and null-calibrated compression distinguish useful structure from degeneracy."
-            ),
-            equation=r"\mathcal C(X)=\bigl([X,L_1],\ldots,[X,L_m]\bigr)",
-            equation_where=(
-                "$X$ is a normalized non-scalar candidate operator; low singular values "
-                "indicate low commutator energy."
-            ),
-            methodology=(
-                "Project out the scalar identity and common kernel/cokernel artifacts "
-                "before interpreting modes.",
-                "Fit on declared contexts, evaluate held-out primitives, and bootstrap "
-                "transitions rather than tokens.",
-                "Calibrate detection thresholds on dense and block-structured null suites "
-                "before inspecting real outputs.",
-            ),
-            guide=InterpretationGuide(
-                supports=(
-                    "Several stable low modes below the null spectrum, plus positive "
-                    "held-out compression, support useful structure."
-                ),
-                weakens=(
-                    "Modes that disappear under resampling or match nulls provide no "
-                    "evidence for a real symmetry or factorization."
-                ),
-            ),
-            plots=(
-                LinePlot(
-                    key="real_commutator",
-                    title="Normalized non-scalar commutator spectrum — MOCKUP",
-                    x_label="non-scalar singular-mode rank",
-                    y_label="normalized singular value",
-                    x=_round(ranks),
-                    series=(
-                        LineSeries(
-                            name="candidate transitions",
-                            color_key="blue",
-                            dash="solid",
-                            y=_round(candidate_spectrum),
-                        ),
-                        LineSeries(
-                            name="sampling-matched null",
-                            color_key="orange",
-                            dash="dash",
-                            y=_round(null_spectrum),
-                        ),
-                    ),
-                    x_range=(1.0, 12.0),
-                    y_range=(0.0, 1.0),
-                    takeaway=(
-                        "MOCKUP reading: reproducible low blue modes below the dashed "
-                        "null would motivate candidate inspection."
-                    ),
-                ),
-            ),
-            takeaway=(
-                "No real-algebra result exists; this tab remains a visibly conditional target."
-            ),
-            caveat=(
-                "A low mode is an operator direction, not automatically an invertible, "
-                "unitary, or permutation symmetry."
             ),
         ),
     )

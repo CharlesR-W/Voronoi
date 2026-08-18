@@ -16,15 +16,6 @@ from voronoi_lab.exp1.geometry import (
     normalized_distortion,
 )
 from voronoi_lab.exp1.nulls import fit_gaussian
-from voronoi_lab.synthetic import (
-    FactorSpace,
-    assert_generator,
-    cyclic_product_group,
-    draw_sparse_generator,
-    reconstruct_support,
-    support_decomposition,
-    twirl_operator,
-)
 
 
 def replay_toy_geometry(root_seed: int, *, rms_epsilon: float) -> dict[str, JSONLike]:
@@ -122,36 +113,4 @@ def replay_toy_geometry(root_seed: int, *, rms_epsilon: float) -> dict[str, JSON
     }
 
 
-def replay_synthetic_invariants(root_seed: int) -> dict[str, JSONLike]:
-    """Recompute the fixed generator/twirl/support invariant smoke."""
-
-    seeds = SeedDeriver(root_seed, ("exp1", "mechanical", "synthetic_invariants"))
-    rng = np.random.default_rng(seeds.derive("generator"))
-    space = FactorSpace((2, 3))
-    generator = draw_sparse_generator(space.n_states, rng, density=0.5)
-    assert_generator(generator)
-    group = cyclic_product_group(space)
-    twirled = twirl_operator(generator, group)
-    assert_generator(twirled)
-    twirl_error = float(np.max(np.abs(twirl_operator(twirled, group) - twirled)))
-    components = support_decomposition(generator, space)
-    support_error = float(
-        np.linalg.norm(reconstruct_support(components, space) - generator)
-        / np.linalg.norm(generator)
-    )
-    commutator_error = float(
-        max(np.linalg.norm(twirled @ element - element @ twirled) for element in group)
-        / np.linalg.norm(twirled)
-    )
-    tolerance = float(1000 * np.finfo(np.float64).eps * space.n_states)
-    return {
-        "commutator_relative_error": commutator_error,
-        "generator_valid": True,
-        "passed": max(twirl_error, support_error, commutator_error) <= tolerance,
-        "support_reconstruction_relative_error": support_error,
-        "tolerance": tolerance,
-        "twirl_idempotence_max_absolute_error": twirl_error,
-    }
-
-
-__all__ = ["replay_synthetic_invariants", "replay_toy_geometry"]
+__all__ = ["replay_toy_geometry"]

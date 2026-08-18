@@ -16,8 +16,10 @@ after material milestones instead of putting mutable status here.
   consumption provenance belongs in the SQLite stage record, never in the artifact ID.
 - Randomness is derived from the configured root seed with semantic namespaces.
   Bootstrap and probe units are images, not spatial sites.
-- Experiment 2 matrices use destination rows, source columns, C-order product-state
-  indexing, and float64 oracle calculations.
+- Keep this repository focused on activation geometry, candidate cells, fissures,
+  commitment, snapping/recovery, and related flatness/plasticity comparisons. Synthetic
+  factor recovery, commutants, operator decomposition, and real algebra belong to the
+  separate `../FactorizedDynamics` project.
 - Unresolved scientific choices must remain explicit configuration or strategy
   parameters. Do not silently turn scaffold defaults into confirmatory protocols.
 - MOCKUP and future measured report payloads share one strict schema. Every schematic

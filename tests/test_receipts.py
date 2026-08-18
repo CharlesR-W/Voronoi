@@ -4,7 +4,6 @@ import sqlite3
 
 import pytest
 
-import voronoi_lab.pipeline as pipeline_module
 import voronoi_lab.receipts as receipts_module
 from voronoi_lab.config import GateOverrideAuthorization, LabConfig
 from voronoi_lab.core import (
@@ -21,18 +20,13 @@ from voronoi_lab.core import (
 )
 from voronoi_lab.execution import ExecutionError, ExperimentRunner, artifact_metadata
 from voronoi_lab.pipeline import (
-    DEFAULT_STAGES,
     ImplementationStatus,
-    PipelineError,
     StageRegistry,
     StageSpec,
-    StageValidationContext,
     expected_gate_rule,
     stage_signature,
-    validate_stage_output,
 )
 from voronoi_lab.receipts import ReceiptError, verify_run_receipt
-from voronoi_lab.stage_handlers import handle_exp2_exact, handle_gate_synthetic_exact
 
 
 def _registry() -> StageRegistry:
@@ -219,111 +213,6 @@ def test_receipt_embeds_gate_result_and_override_lineage(tmp_path) -> None:
     assert stage["gate"]["status"] == "OVERRIDDEN"
     assert stage["gate"]["natural_status"] == "FAIL"
     assert stage["override_lineage"][0]["reason"] == "receipt test authorization"
-
-
-def test_exact_receipt_verifies_shard_records_and_reducer(tmp_path) -> None:
-    raw = LabConfig().model_dump(mode="json")
-    raw["runtime"]["workers"] = 2
-    raw["experiment2"]["exact_instances"] = 2
-    raw["experiment2"]["oracle_factor_sizes"] = [2, 2]
-    raw["experiment2"]["train_primitives"] = 4
-    raw["experiment2"]["heldout_primitives"] = 2
-    raw["experiment2"]["exact_protocol"]["max_states"] = 4
-    raw["gates"]["synthetic"]["noiseless_instances"] = 2
-    config = LabConfig.model_validate(raw)
-    runner = ExperimentRunner(
-        config,
-        project_root=tmp_path,
-        registry=DEFAULT_STAGES,
-        handlers={"exp2.exact": handle_exp2_exact},
-        run_id="exact-receipt",
-    )
-
-    runner.run(["exp2.exact"])
-
-    assert runner.receipt_artifact_id is not None
-    verified = verify_run_receipt(runner.store, runner.receipt_artifact_id)
-    auxiliary = verified.payload["auxiliary_stage_records"]
-    assert len(auxiliary) == 2
-    assert all(record["parent_stage"] == "exp2.exact" for record in auxiliary)
-    assert len(verified.auxiliary_artifacts) == 3  # two shards plus reducer manifest
-
-
-def test_runner_gate_and_receipt_replay_exact_once_per_validation_chain(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    raw = LabConfig().model_dump(mode="json")
-    raw["runtime"]["workers"] = 0
-    raw["experiment2"]["exact_instances"] = 1
-    raw["experiment2"]["oracle_factor_sizes"] = [2, 2]
-    raw["experiment2"]["train_primitives"] = 4
-    raw["experiment2"]["heldout_primitives"] = 2
-    raw["experiment2"]["exact_protocol"]["max_states"] = 4
-    raw["gates"]["synthetic"]["noiseless_instances"] = 1
-    config = LabConfig.model_validate(raw)
-    calls = 0
-    original = pipeline_module._validate_exact_payload
-
-    def counted(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(pipeline_module, "_validate_exact_payload", counted)
-    runner = ExperimentRunner(
-        config,
-        project_root=tmp_path,
-        registry=DEFAULT_STAGES,
-        handlers={
-            "exp2.exact": handle_exp2_exact,
-            "gate.synthetic_exact": handle_gate_synthetic_exact,
-        },
-        run_id="exact-validation-memo",
-    )
-    outputs = runner.run(["gate.synthetic_exact"])
-    assert calls == 1
-
-    context = StageValidationContext()
-    exact = outputs["exp2.exact"]
-    gate = outputs["gate.synthetic_exact"]
-    validate_stage_output(
-        exact,
-        DEFAULT_STAGES.get("exp2.exact"),
-        runner.store,
-        config=config,
-        registry=DEFAULT_STAGES,
-        source_identity=runner.source_identity,
-        validation_context=context,
-    )
-    validate_stage_output(
-        gate,
-        DEFAULT_STAGES.get("gate.synthetic_exact"),
-        runner.store,
-        config=config,
-        registry=DEFAULT_STAGES,
-        source_identity=runner.source_identity,
-        validation_context=context,
-    )
-    assert calls == 2
-
-    exact_payload = runner.store.read_json(exact.artifact_id, "exact.json")
-    shard_id = exact_payload["ordered_instance_artifact_ids"][0]
-    shard = runner.store.get(shard_id)
-    shard_path = shard.payload_path("instance.json")
-    shard_path.chmod(0o600)
-    shard_path.write_bytes(shard_path.read_bytes() + b"\n")
-    with pytest.raises(PipelineError, match="memoized validation closure"):
-        validate_stage_output(
-            gate,
-            DEFAULT_STAGES.get("gate.synthetic_exact"),
-            runner.store,
-            config=config,
-            registry=DEFAULT_STAGES,
-            source_identity=runner.source_identity,
-            validation_context=context,
-        )
-    assert calls == 2
 
 
 def test_receipt_binds_contracted_gate_override_authorization(tmp_path) -> None:
@@ -822,56 +711,3 @@ def test_receipt_verifies_registry_contract_v1_after_contract_schema_expansion(
     assert verified.integrity_validation == "PASSED"
     assert verified.registry_compatibility == "DRIFTED"
     assert verified.semantic_validation == "SKIPPED"
-
-
-def test_cached_exact_receipt_recovers_producer_shard_closure_without_index(tmp_path) -> None:
-    raw = LabConfig().model_dump(mode="json")
-    raw["runtime"]["workers"] = 0
-    raw["experiment2"]["exact_instances"] = 2
-    raw["experiment2"]["oracle_factor_sizes"] = [2, 2]
-    raw["experiment2"]["train_primitives"] = 4
-    raw["experiment2"]["heldout_primitives"] = 2
-    raw["experiment2"]["exact_protocol"]["max_states"] = 4
-    raw["gates"]["synthetic"]["noiseless_instances"] = 2
-    config = LabConfig.model_validate(raw)
-    calls: list[str] = []
-
-    def exact(context, dependencies):
-        calls.append(context.run_id)
-        return handle_exp2_exact(context, dependencies)
-
-    producer = ExperimentRunner(
-        config,
-        project_root=tmp_path,
-        registry=DEFAULT_STAGES,
-        handlers={"exp2.exact": exact},
-        run_id="exact-producer",
-    )
-    producer.run(["exp2.exact"])
-    producer_run = producer.index.get_run("exact-producer")
-    assert producer_run is not None
-    consumer = ExperimentRunner(
-        config,
-        project_root=tmp_path,
-        registry=DEFAULT_STAGES,
-        handlers={"exp2.exact": exact},
-        run_id="exact-consumer",
-    )
-    consumer.run(["exp2.exact"])
-
-    assert calls == ["exact-producer"]
-    assert [stage.stage_name for stage in consumer.index.list_stages("exact-consumer")] == [
-        "exp2.exact"
-    ]
-    assert consumer.receipt_artifact_id is not None
-    receipt_id = consumer.receipt_artifact_id
-    verified = verify_run_receipt(consumer.store, receipt_id)
-    auxiliary = verified.payload["auxiliary_stage_records"]
-    assert len(auxiliary) == 2
-    assert {record["record_run_id"] for record in auxiliary} == {"exact-producer"}
-    assert {record["record_metadata"]["run_provenance_artifact_id"] for record in auxiliary} == {
-        producer_run.provenance_artifact_id
-    }
-    consumer.index.path.unlink()
-    verified_without_index = verify_run_receipt(consumer.store, receipt_id)
-    assert len(verified_without_index.auxiliary_artifacts) == 3

@@ -44,8 +44,6 @@ def test_mock_payload_is_deterministic_and_conspicuously_labeled() -> None:
     assert tuple(experiment.key for experiment in first.experiments) == (
         "formation",
         "snapping",
-        "synthetic",
-        "real_algebra",
     )
     for experiment in first.experiments:
         assert experiment.status == "MOCKUP"

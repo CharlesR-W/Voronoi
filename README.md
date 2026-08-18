@@ -1,23 +1,63 @@
 # Voronoi Residual Computation Lab
 
-> **Status: Experiment 1 activation-geometry collection implemented and one local
-> exploratory pilot integrity-verified; candidate-cell phenomenon gates remain
-> unrun.** The repository now contains a strict stage DAG, immutable artifacts and
-> receipts, hash-pinned ResNet/VGG checkpoint adapters, a trained synthetic residual
-> task, real/fake response and Jacobian fields, synchronized checkpoint GIFs,
-> mechanical checks, a tiny exact synthetic subgate, and a self-contained `MOCKUP`
-> report. The measured pilot is not evidence that residual candidate cells form,
-> snap, recover, or factor.
+> **Status: activation-geometry collection implemented and one local exploratory
+> pilot integrity-verified; candidate-cell phenomenon gates remain unrun.** The
+> repository contains a strict stage DAG, immutable artifacts and receipts,
+> hash-pinned ResNet/VGG checkpoint adapters, a trained synthetic residual task,
+> real/fake response and Jacobian fields, synchronized checkpoint GIFs, mechanical
+> checks, and a self-contained `MOCKUP` report. The measured pilot is not evidence
+> that residual candidate cells form, snap, or recover.
 
 This project asks whether continuous residual computation admits a useful
-finite-state description and, if it does, whether the resulting transition
-maps have approximate symmetries or low-interaction factor coordinates.
+finite-state description: whether learned representations develop functionally
+flat regions separated by narrow sensitive fissures, and whether states become
+increasingly committed to those regions over training.
 
 The order matters. Fitting centroids always creates a Voronoi partition. The
 scientific question is whether that partition is stable on held-out data,
-predictively adequate, and causally useful. Only after those tests pass does it
-make sense to treat the occupied cells as states of a coarse computation and
-ask whether that computation factors.
+predictively adequate, and causally useful. The geometry is useful only if it
+tracks something the network actually does.
+
+## Motivation: flats, fissures, and commitment
+
+The motivating whiteboard picture is a continuous state cloud that may become
+discrete-like without acquiring a literal hard quantizer. A learned map could have
+broad interiors in which moving an activation changes the downstream computation
+very little, separated by narrow **fissures** in which a small displacement changes
+the computation sharply. Candidate centroids and their Voronoi boundaries are probes
+for that picture, not evidence that the picture is true.
+
+This suggests several connected questions:
+
+- **Functional flatness.** Are downstream predictions unusually insensitive to
+  within-region activation perturbations, relative to matched directions and null
+  representations?
+- **Fissures.** Is sensitivity concentrated in narrow regions, and do those regions
+  align with independently fitted candidate-cell boundaries rather than arbitrary
+  locations along the same paths?
+- **Basin commitment.** Do representations become more stably assigned to candidate
+  regions over training, and, separately, do perturbed states recover toward the clean
+  downstream region? The first is assignment commitment; the second is dynamical
+  recovery. Neither alone licenses attractor language.
+- **Noise across scales.** If residual noise is swept over logarithmic or power-law
+  scales, is the response scale-free and smooth, or is there a characteristic regime
+  in which cell crossings and functional damage concentrate? Either pattern is a
+  diagnostic; a kink, threshold, or power law does not by itself prove discrete
+  computation.
+- **Flatness and plasticity.** Does activation-space functional flatness covary with
+  Fisher- or parameter-space flatness and with independent measures of module
+  plasticity? These live in different spaces and must be measured separately; the
+  whiteboard connection is a comparison to test, not an equivalence.
+- **Where and when.** Are these effects strongest in middle layers, do they emerge
+  from early to late training, and do they differ between residual and non-residual
+  architectures, real and matched fake states, or different classes?
+
+The immediate experiments therefore combine geometry, interventions, and training
+time. They ask whether apparent cells are stable, whether their interiors are
+functionally flat, whether their boundaries behave like fissures, whether snapping
+or finite downstream recovery is exceptional, and how those quantities relate to
+module criticality. The current pilot collects some of the required activation data;
+it does not yet answer those questions.
 
 ## Start here
 
@@ -29,16 +69,15 @@ uv sync --all-extras
 .venv/bin/voronoi-lab plan --json
 ```
 
-The currently runnable scientific-validation targets are
-`gate.mechanical` and `gate.synthetic_exact`. The exploratory Experiment 1 collection
-targets `exp1.synthetic_task`, `exp1.plateau.synthetic`, `exp1.plateau.cifar`, and
-`exp1.plateau.animations` are also runnable; `report.build` still creates only the
+The currently runnable scientific-validation target is `gate.mechanical`. The
+exploratory collection stages `exp1.synthetic_task`, `exp1.plateau.synthetic`,
+`exp1.plateau.cifar`, and `exp1.plateau.animations` are also runnable;
+`report.build` still creates only the
 visibly watermarked schematic. Every successful `run` publishes an immutable,
 database-independent receipt and prints its artifact ID. For example:
 
 ```bash
 .venv/bin/voronoi-lab run --until gate.mechanical --json
-.venv/bin/voronoi-lab run --until gate.synthetic_exact --json
 .venv/bin/voronoi-lab run --until exp1.plateau.animations --json
 .venv/bin/voronoi-lab run --stage report.build --json
 ```
@@ -56,10 +95,7 @@ Current inputs are local-only and are **not clone-safe**:
   are in the sibling `../Experiments/Tracking2/` project; their presence was
   verified locally on 2026-08-16, but they are not vendored here;
 - the VGG-19+BN definition and five seed-0 checkpoints are also hash-pinned in
-  that sibling project under an explicitly weaker `exploratory_legacy` lineage;
-- and the two mathematical design notes are archived under `references/notes/`
-  with hashes listed in `references/README.md`; they are proposals, not
-  empirical sources.
+  that sibling project under an explicitly weaker `exploratory_legacy` lineage.
 
 The canonical local pilot, raw array inventory, and animation links are in
 [`RESULTS.md`](RESULTS.md) and
@@ -69,9 +105,8 @@ state is summarized in [`STATUS.md`](STATUS.md).
 The infrastructure boundary is deliberate. Runnable stages use strict,
 versioned payload schemas, semantic seed namespaces, content-addressed objects,
 cross-run caching, explicit gate rules and authorizations, source-drift checks,
-shard-level recovery for the exact synthetic gate, and append-only run receipts.
-The formation, boundary, snapping, three-seed confirmation, sampled recovery,
-and real-algebra stages remain `PLANNED` and cannot be accidentally executed.
+and append-only run receipts. The formation, boundary, snapping, and three-seed
+confirmation stages remain `PLANNED` and cannot be accidentally executed.
 
 The intended dependency is:
 
@@ -81,22 +116,15 @@ reported activation plateaus / sharp residual boundaries
        define the residual unit, metric, probes, and codebook
                          |
        held-out finite-state fidelity and stability
-                  +------+-------------------+
-                  |                          |
-       recovery, boundary,          validated coarse
-       and snapping tests           transition model --------+
-                  |                                           |
-       exploratory comparison                                 |
-       with transplant damage                                 |
-                                                              v
-synthetic known-factor benchmark --> algebraic methods pass -->+
-                                                              |
-                                         +--------------------+----------+
-                                         |                               |
-                              real symmetry screen             real factor search
-                                                                         |
-                                                              multiscale quotients
-                                                                   (deferred)
+                  +------+------------------+
+                  |                         |
+       recovery, boundary,         noise-scale and
+       and snapping tests          commitment diagnostics
+                  |                         |
+                  +------------+------------+
+                               |
+                exploratory comparison with
+             module plasticity and transplant damage
 ```
 
 ## Claim ledger
@@ -107,18 +135,19 @@ The project deliberately separates claims that are easy to conflate.
 |---|---|
 | A fitted codebook induces Voronoi cells | Definition; true by construction |
 | Residual states develop a stable, useful finite-state description during training | Primary empirical hypothesis |
+| Within-region functional response becomes unusually flat | Primary functional hypothesis |
+| Narrow sensitivity fissures align with independently fitted cell boundaries | Stronger, separate hypothesis |
+| Assignment and recovery commitment increase through training | Two related but distinct hypotheses |
+| Noise-scale response distinguishes scale-free sensitivity from a characteristic crossing regime | Exploratory diagnostic; not yet a gate |
+| Activation flatness is related to Fisher flatness or module plasticity | Exploratory comparison; no equivalence assumed |
 | Perturbed states are corrected toward the interiors of those cells | Stronger, separate hypothesis |
 | Functional sensitivity is concentrated near cell boundaries | Stronger, separate hypothesis |
 | Moving a residual to its nearest centroid preserves or improves computation | Planned causal test |
 | Recovery is related to module-transplant sensitivity | Exploratory comparison; direction unspecified |
-| Coarse transition families have nontrivial approximate symmetries | Conditional empirical hypothesis |
-| Several transitions simplify in one shared product coordinate system | Conditional and stronger hypothesis |
-| Nested quotients expose rules with localized exceptions | Deferred direction |
 
 Until the corresponding gates pass, this README uses **candidate cell** rather
-than basin, **recovery** rather than attraction, **boundary sensitivity** rather
-than a Jacobian wall, and **low-commutator direction** rather than learned
-symmetry algebra.
+than basin, **recovery** rather than attraction, and **boundary sensitivity** or
+candidate fissure rather than a Jacobian wall.
 
 Several distinctions are load-bearing:
 
@@ -136,8 +165,12 @@ Several distinctions are load-bearing:
   itself performs snapping.
 - Module-transplant tolerance does not by itself measure activation error
   correction.
-- A nontrivial commutant need not imply a tensor product, and a useful tensor
-  product need not leave a nontrivial global commutant.
+- Activation-space response flatness, Fisher or parameter-space flatness, and
+  continued trainability are different quantities. Any relationship among them
+  must be measured rather than inferred from shared vocabulary.
+- A power law, threshold, or other shape in a noise-response curve is not by
+  itself evidence for discrete computation; alignment with held-out cells and
+  matched nulls remains necessary.
 
 ## Experiment 1: do candidate cells form during ResNet training?
 
@@ -357,15 +390,37 @@ segments are evidence about off-support behavior, not meaningful interpolation
 between data states.
 
 As a descriptive visualization, construct two precomputed-distance embeddings
-for a fixed held-out probe bank at each selected checkpoint and cut. The first
-uses pairwise cosine distance between standardized activations. The second uses
-a symmetrized path cost obtained by integrating, or discretely averaging, a
-declared next-block or suffix Jacobian response along the chosen interpolation
-path. This Jacobian-derived cost must be named precisely and checked for
-nonnegativity, symmetry, and triangle-inequality violations rather than assumed
-to be a metric. For a small image substrate such as MNIST, the probe bank could
-include every test digit; for the present CIFAR-10 substrate it should use the
-fixed held-out bank and may color points by class only as a diagnostic.
+at each selected checkpoint and cut. The first uses pairwise cosine distance
+between standardized activations. The second uses the **integrated Jacobian
+barrier** between each pair: a symmetrized path cost obtained by integrating, or
+discretely averaging, a declared next-block or suffix Jacobian response along the
+chosen interpolation path. This is the intended meaning of the whiteboard circles
+containing dots: the dots are individual examples, and their plotted geometry is
+induced by the accumulated functional barrier between examples.
+
+Run this as a dedicated MNIST experiment using every test digit, not merely a
+small visual sample. Each dot represents one MNIST image. For convolutional layers,
+freeze an explicit image-level state construction before looking at the plot; do not
+silently turn spatial sites into additional dots or change pooling across layers. At
+every selected layer and training checkpoint, fit the same
+standardized candidate-centroid analysis on a disjoint training bank, assign every
+test point, and retain its margin and centroid distance. Retain the complete pairwise
+barrier matrix and derive one fixed-identity point layout from it; show fitted centroids
+and assignments without presenting projected boundaries as the measured cells. Color
+by digit only after computing the unsupervised geometry. The motivating
+hypothesis is that, as the network identifies classes, integrated barriers among
+same-class examples decrease relative to barriers between classes, producing
+increasingly class-aligned neighborhoods. Test that hypothesis on the original
+pairwise costs with within-class and between-class summaries and label-permutation
+nulls; do not infer it from the two-dimensional circles alone. Because all-pairs
+path integration over the full MNIST test set is quadratic and potentially
+expensive, any approximation must be declared, convergence-checked against an
+exact subset, and kept separate from the stated full-matrix target.
+
+The Jacobian-derived cost must be named precisely and checked for nonnegativity,
+symmetry, and triangle-inequality violations rather than assumed to be a metric.
+For the present CIFAR-10 substrate, retain the smaller fixed held-out bank and use
+class coloring only as a diagnostic.
 
 Fit one aligned layout per distance definition across all checkpoints, keep the
 point identities and camera fixed, and animate the two layouts side by side.
@@ -471,6 +526,30 @@ Two opposing readings are both live:
 With eight blocks and one seed, this is descriptive. Any association must
 repeat across independently trained seeds before it receives much weight.
 
+### 1F. Whiteboard-derived secondary diagnostics
+
+Three comparisons motivate the project but are not yet part of a frozen gate.
+
+First, sweep direct residual perturbations over a predeclared logarithmic range of
+scales, optionally sampling magnitudes from a declared power-law family. Plot
+functional damage, cell-crossing probability, and boundary-normalized displacement
+on the same scale axis. Compare against covariance-matched and direction-shuffled
+nulls. The purpose is to distinguish broadly scale-free sensitivity from damage
+concentrated near a characteristic crossing scale, not to declare either curve
+shape intrinsically discrete.
+
+Second, track **assignment commitment**—held-out assignment stability, normalized
+margin, and persistence under codebook refits—from early through late training.
+Keep it separate from **recovery commitment**, which asks whether a perturbed state
+returns to the clean downstream assignment. Report both across depth so a middle-layer
+effect is visible rather than averaged away.
+
+Third, place the activation-space flatness and fissure statistics beside independently
+defined Fisher- or parameter-space flatness and module-plasticity measurements. This
+is an exploratory association with no preregistered sign. Shared words such as
+“flatness,” “plasticity,” or “critical” must not collapse the distinct interventions
+or uncertainty units.
+
 ### Experiment 1 gates
 
 1. **Mechanical gate.** Verify distinct hash-pinned train/test source files,
@@ -510,343 +589,13 @@ Useful negative outcomes remain distinct:
 - strong geometry with indispensable within-cell information rejects the
   proposed coarse state at that resolution.
 
-## Experiment 2: recover hidden factors and operators synthetically
+## Algebraic factor recovery moved to a separate project
 
-### Question
-
-Given only a family of transition operators on an arbitrarily relabeled finite
-state set, can an algorithm recover both a product labeling of the states and a
-low-order decomposition of the transitions? Separately, can the low spectrum of
-a commutator map recover deliberately planted approximate symmetries?
-
-The synthetic benchmark is not optional validation. Any later claim about
-factors in neural candidate cells is gated on recovery where the latent answer
-is known.
-
-### Generative model
-
-Let the latent state set be
-
-$$
-\mathcal C_*
-=
-[n_1]\times\cdots\times[n_k],
-\qquad
-N=\prod_{r=1}^k n_r,
-$$
-
-but expose it only through a random bijection
-$\pi:\mathcal C\to\mathcal C_*$. The first stages supply $k$ and the factor
-sizes; discovering them is deferred.
-
-Matrices use the column convention $P_{ji}=P(j\mid i)$, so valid generators
-have nonnegative off-diagonal entries and zero column sums.
-
-Use continuous-time Markov generators because independent asynchronous factor
-dynamics add at generator level. For primitive $\alpha$ and support
-$S\subseteq[k]$, draw a sparse valid generator $R_{\alpha,S}$ on the factors in
-$S$ and lift it by the identity on the remaining factors.
-
-Interaction strength and symmetry breaking should be independent experimental
-knobs. Choose fixed finite permutation groups $G_r$ acting on the factor labels
-and their compatible product $G=\prod_r G_r$. For each support use the
-restriction $G_S=\prod_{r\in S}G_r$, represent every $g$ by its permutation
-matrix $U_S(g)$, and twirl a generator,
-
-$$
-\bar R_{\alpha,S}
-=
-\frac{1}{|G_S|}
-\sum_{g\in G_S}
-U_S(g)R_{\alpha,S}U_S(g)^{-1},
-$$
-
-then set
-
-$$
-R_{\alpha,S}(\delta)
-=
-(1-\delta)\bar R_{\alpha,S}+\delta R_{\alpha,S}.
-$$
-
-Take $0\leq\delta\leq1$. Permutation conjugation, group averaging, and this
-convex interpolation then preserve the generator cone.
-
-The full latent generator is
-
-$$
-L_\alpha^*
-=
-a_\alpha\left[
-\sum_{|S|=1}w_{\alpha,S}R_{\alpha,S}(\delta)\otimes I_{\bar S}
-+
-\rho\sum_{|S|=2}w_{\alpha,S}R_{\alpha,S}(\delta)\otimes I_{\bar S}
-\right],
-$$
-
-where $a_\alpha$ normalizes the exit rate. Require $a_\alpha>0$,
-$w_{\alpha,S}\geq0$, and $\rho\geq0$, so the sum remains a valid generator. Thus $\rho$ controls
-genuine pairwise interaction while $\delta$ controls departure from one
-compatible planted global symmetry. Twirling the pair terms too prevents
-interaction and symmetry breaking from becoming interchangeable. The input knob
-$\rho$ is not itself the recovered Hilbert--Schmidt pair energy, so every
-generated instance also records its realized normalized support-order spectrum.
-
-The observed generator is only a conjugated version,
-
-$$
-L_\alpha
-=
-\Pi_\pi^\top L_\alpha^*\Pi_\pi.
-$$
-
-The noiseless task supplies the generators exactly. The sampled task takes a
-known sufficiently small $\tau$, forms $P_\alpha=I+\tau L_\alpha$, and supplies
-multinomial transition counts from every state and primitive. This avoids an
-unqualified matrix logarithm, whose branches and sampling instability would
-otherwise muddy the benchmark.
-
-### Joint factor and operator objective
-
-For each proposed factor, decompose its operator space orthogonally as
-
-$$
-\operatorname{End}(\mathcal H_r)
-=
-\operatorname{span}\{I_r\}
-\oplus
-\operatorname{span}\{I_r\}^{\perp}.
-$$
-
-Tensoring these decompositions gives a unique support decomposition
-
-$$
-L_\alpha
-=
-\sum_{S\subseteq[k]}L_{\alpha,S},
-$$
-
-where a support-$S$ term is non-identity on exactly the factors in $S$. This
-prevents a nominal pair interaction from quietly retaining unary components.
-Let $\mathsf P_S^\pi$ be the corresponding projection after relabeling states by
-$\pi$. A direct training objective is
-
-$$
-J(\pi)
-=
-\sum_{\alpha\in\mathrm{train}}
-\sum_{S\subseteq[k]}
-\lambda_{|S|}
-\left\|\mathsf P_S^\pi(L_\alpha)\right\|_F^2,
-\qquad
-\lambda_0=\lambda_1=0<\lambda_2<\lambda_3<\cdots.
-$$
-
-The outer search finds a shared state relabeling; the inner orthogonal
-projections simultaneously give the best operators at each interaction order.
-After selecting a labeling, refit the retained components **jointly**, requiring
-the reconstructed sum to have nonnegative off-diagonal entries and zero column
-sums. Individual orthogonal support components need not themselves be Markov
-generators. With sampled counts, use held-out likelihood plus the same
-order-weighted penalty. Held-out primitives are essential: they test whether a
-coordinate system was recovered, not merely whether one family of coefficients
-was fit.
-
-For nonuniform visitation, replace Frobenius error with an explicitly declared
-data-weighted operator metric. Uniform state enumeration is primary in the
-first benchmark because it makes the score invariant to the hidden
-permutation.
-
-### Symmetry diagnostic
-
-Given a family of recovered or observed operators, define
-
-$$
-\mathcal C(X)
-=
-\bigl([X,L_1],\ldots,[X,L_m]\bigr).
-$$
-
-Zero singular modes give the exact commutant; low singular modes are
-low-commutator directions. The scalar identity must be projected out, candidate
-operators normalized, and the low spectrum compared with sampling-aware nulls
-and held-out primitives. A low mode is not automatically a group element: it
-may be a projection or observable. Only after checking the relevant
-invertibility, unitary, or permutation constraints should one round it to a
-candidate symmetry transformation.
-
-Symmetry and factorization are parallel tests. A family of local operations can
-generate the full matrix algebra and have only scalar global commutants while
-still possessing an excellent product description. Conversely, a large
-commutant can arise from duplicated or insufficiently sampled states without
-revealing factors.
-
-### Recovery ladder
-
-1. **Oracle-coordinate check.** Given the true labels, recover the
-   Hilbert--Schmidt support components computed from the exact full generator,
-   verify the common global twirl defect is zero at $\delta=0$, verify the full
-   reconstructed sum remains a generator, and verify convergence under finite
-   sampling. Do not demand that each raw generative summand equal one orthogonal
-   support component.
-2. **Tiny exhaustive check.** Use $k=2$ and $(n_1,n_2)=(2,3)$ so exhaustive
-   relabeling supplies a gold-standard objective result.
-3. **Cartesian graph baseline.** At $\rho=0$, factor the colored aggregate
-   transition graph. Under noise and interaction, use the result only as an
-   initializer.
-4. **Commuting-subalgebra route.** Cluster primitives whose cross-group
-   commutators are small, infer multiplicity structure from the associated
-   algebras, and separately round the abstract basis information to a discrete
-   state labeling using positivity, sparsity, and the transition graph.
-5. **Joint refinement.** Alternate closed-form support projection/operator
-   fitting with swaps of state assignments that lower $J$. Compare graph,
-   algebraic, random, and oracle initializations on a $(4,5)$ state product.
-6. **Noise and null sweep.** Vary $(\rho,\delta)$ independently, then repeat a
-   subset with finite transition counts and held-out primitives.
-7. **Later only:** enumerate divisor tuples of $N$ to choose factor sizes using
-   held-out likelihood plus a complexity penalty; then consider three factors,
-   conditional updates, and centroid geometry.
-
-Required baselines include random balanced factor labels, no relabeling,
-Cartesian factorization alone, commutant methods alone, and oracle labels.
-Required nulls include dense random Markov generators matched in size, a block
-cluster model with no Cartesian product, and a genuinely independent generator
-incorrectly scored at finite-step $P$ level to demonstrate why generator-level
-additivity matters.
-
-Report factor recovery only up to independent within-factor relabeling and
-permutation of equal-sized factors. Metrics include coordinate adjusted mutual
-information, exact tuple recovery after optimal alignment, held-out transition
-negative log likelihood, aligned support-term error, recovered interaction
-order, principal angles between planted and recovered commutant subspaces,
-false-positive rate on unfactored nulls, and bootstrap stability. The excess
-held-out high-order energy above the oracle-label energy is more informative
-than raw residual when interactions are deliberately planted.
-
-Failure can be correct. The labeling is not identifiable if the primitives do
-not distinguish coordinates, if factor action families are indistinguishable,
-or if the aggregate graph admits multiple product decompositions. Abstract
-matrix algebras determine factors only up to local changes of basis; recovering
-a product labeling of one-hot cells requires the additional Markov positivity
-or graph structure. Exact symmetry can itself make orbit members
-indistinguishable. Large interactions should eventually destroy stable
-recovery rather than force the algorithm to return a preferred ontology.
-
-## Conditional bridge to real cell transitions
-
-If Experiment 1 supplies stable candidate states, empirical transitions may be
-estimated as
-
-$$
-P_{t,\ell,\alpha}(j\mid i)
-=
-\Pr\!\left(
-q_{t,\ell+1}(h_{t,\ell+1})=j
-\mid
-q_{t,\ell}(h_{t,\ell})=i,\alpha
-\right).
-$$
-
-The conditioning variable $\alpha$ must be explicit: for example, perturbation
-family, intervention, or another declared context. Such an empirical operator
-depends on the context distribution and cell occupancy; it is not
-automatically a distribution-free property of the network.
-
-Sitewise CNN states also require an explicit pairing rule across depth. The
-first real transition pass therefore uses only the four within-stage
-first-block-to-second-block maps, whose spatial grids have the same resolution,
-and pairs matching spatial sites. Transitions across stride-2 blocks are
-excluded until a receptive-field or transport rule is specified and tested.
-
-Layer-specific cell sets usually differ, so adjacent-cut maps are rectangular.
-The natural approximate relation is then an intertwining condition
-
-$$
-X_{\ell+1}P_{\ell,\alpha}
-\approx
-P_{\ell,\alpha}X_\ell,
-$$
-
-not a commutator. A common $[X,P_\alpha]$ objective is justified only after
-constructing and validating a shared state space on which every $P_\alpha$ is
-square. The synthetic experiment deliberately starts with that easier square
-case. Even in the rectangular case the identity pair is a trivial exact
-intertwiner, and rank deficiency creates additional exact modes supported only
-in common kernels or cokernels. Before interpreting a low mode, restrict to the
-empirically occupied input/output subspaces, quotient the identity and common
-kernel/cokernel solutions, normalize the admissible $X_\ell$, and require the
-remaining structure to survive held-out contexts. A raw rectangular
-intertwiner spectrum is not a symmetry spectrum.
-
-For a square family and a declared positive-definite state metric $G$, the
-coordinate-aware operator norm is
-
-$$
-\|A\|_{\mathrm{HS},G}^2
-=
-\operatorname{Tr}\!\left(G^{-1}A^\dagger G A\right).
-$$
-
-This keeps the algebraic statement “what commutes?” distinct from the metric
-statement “how badly is commutation broken?” Low-commutator modes must survive
-resampling, held-out contexts, and occupancy-matched nulls. A proposed factor
-coordinate system must compress held-out transitions; operator-Schmidt spectra
-can score a proposed factorization but do not discover one by themselves.
-
-## Deferred direction: multiscale quotients
-
-The eventual “resolution dial” should start from nested partitions of a
-validated fine cell set,
-
-$$
-\Pi_0\prec\Pi_1\prec\cdots\prec\Pi_L,
-$$
-
-which induce nested spaces of block-constant observables
-
-$$
-V_0\subseteq V_1\subseteq\cdots\subseteq\mathbb C^{\mathcal C}.
-$$
-
-For a transition operator acting on distributions, exact lumpability is
-invariance of $V_\ell$ under its corresponding observable operator. One useful
-approximate defect in the shared square-state case is
-
-$$
-E_\ell
-=
-\sum_\alpha
-\left\|
-(I-\Pi_{V_\ell})P_\alpha^\top\Pi_{V_\ell}
-\right\|^2.
-$$
-
-Here every projection uses the declared occupancy-weighted inner product. For a
-rectangular transition $P:\mathbb C^{\mathcal C_{\mathrm{in}}}\to
-\mathbb C^{\mathcal C_{\mathrm{out}}}$ with separate block-constant observable
-spaces, the compatible condition and defect are instead
-
-$$
-P^\top V_{\mathrm{out}}\subseteq V_{\mathrm{in}},
-\qquad
-E_{\mathrm{in},\mathrm{out}}
-=
-\left\|
-(I-\Pi_{V_{\mathrm{in}}})P^\top\Pi_{V_{\mathrm{out}}}
-\right\|^2.
-$$
-
-Large local contributions say that a coarse block hides distinctions needed to
-predict its outgoing transitions, which provides a direct trigger for local
-refinement. This is the probabilistic version of “$A$ usually maps to $B$, but
-the refined subcase $A_1$ maps to $C$.”
-
-The coarse operator algebras act on different quotient spaces, so they are not
-automatically a canonical chain
-$\mathcal A^{(0)}\subseteq\mathcal A^{(1)}\subseteq\cdots$. Any such algebra
-filtration needs explicit restriction and lift maps. This mathematical and
-experimental direction is recorded here, but it is not part of the first two
-experiments.
+The former Experiment 2—synthetic factor recovery, commutant spectra, operator
+decomposition, real-transition intertwiners, and multiscale quotients—now lives in the
+standalone local sibling project `../FactorizedDynamics`. Those questions require their
+own synthetic benchmarks, validation ladder, and claim ledger. They are no longer a
+downstream stage or scientific gate for this activation-geometry project.
 
 ## Dashboard and animation specification
 
@@ -870,12 +619,14 @@ Planned views are:
    fixed across frames; per-frame embeddings are prohibited because their
    motion can manufacture apparent formation. Any two-dimensional Voronoi
    overlay is labeled as a projection, not the measured high-dimensional cell.
-4. **Paired distance animation and matrices.** Fixed-layout UMAP views of the
-   same probe states under cosine distance and the declared path-integrated
-   Jacobian cost, synchronized through training. Beside them, show the full
-   distance or similarity heatmaps with fixed sample ordering and color scale.
-   The panels are descriptive and their two-dimensional coordinates are not
-   treated as directly comparable across distance definitions.
+4. **MNIST centroid and Jacobian-barrier geometry.** For every MNIST test point,
+   show candidate-centroid assignments, margins, and a fixed-identity layout induced
+   by the integrated Jacobian barrier, synchronized across selected layers and
+   training checkpoints. Pair it with the complete pairwise barrier heatmap and
+   quantitative within-class versus between-class summaries under label-permutation
+   nulls. A cosine-distance layout is a companion baseline. The two-dimensional
+   circles are descriptive; the class-alignment hypothesis is tested on the original
+   pairwise costs.
 5. **Interpolation sensitivity.** Plateau and boundary-response curves under
    linear, radius-preserving, and neighbor-graph paths, paired with path-support
    diagnostics so off-support segments remain visible.
@@ -883,13 +634,11 @@ Planned views are:
    equal-norm controls, plus clean-versus-perturbed trajectories through depth.
 7. **Module comparison.** Transplant damage beside contraction and boundary
    measurements, labeled descriptive until independently replicated.
-8. **Synthetic recovery.** Planted versus recovered product coordinates,
-   interaction-order spectra, commutator spectra, held-out reconstruction, and
-   recovery curves across $(\rho,\delta,\text{sample count})$.
-9. **Conditional real algebra.** Only after both gates pass: low-commutator or
-   intertwiner spectra, factor-coordinate compression, null comparisons, and
-   stability.
-10. **Provenance and negative results.** Configurations, hashes, probe banks,
+8. **Commitment, noise scale, and flatness comparisons.** Assignment and recovery
+   commitment through depth and training; noise-response and crossing curves over
+   scale; and activation flatness beside separately defined Fisher flatness and
+   module plasticity.
+9. **Provenance and negative results.** Configurations, hashes, probe banks,
    metrics, $K$, occupancy, seeds, uncertainty units, nulls, failed gates, and
    explicit non-claims.
 
@@ -907,12 +656,10 @@ their held-out or confirmatory data are inspected.
 
 | Gate | Primary statistic and comparator | Uncertainty unit and provisional pass rule | Action |
 |---|---|---|---|
-| Mechanical | Identity intervention, standardized/native round trip, JVP versus centered finite difference, generator and twirl invariants | Exact identity parity; relative RMS round-trip error $<10^{-6}$ in fp32; median JVP relative error $<10^{-2}$ and 95th percentile $<5\times10^{-2}$; generator/commutator checks at dtype-scaled test tolerance | Fix implementation before any phenomenon plot if one check fails |
+| Mechanical | Identity intervention, standardized/native round trip, and JVP versus centered finite difference | Exact identity parity; relative RMS round-trip error $<10^{-6}$ in fp32; median JVP relative error $<10^{-2}$ and 95th percentile $<5\times10^{-2}$ | Fix implementation before any phenomenon plot if one check fails |
 | Coarse ResNet phenomenon | $D_K$ and bootstrap assignment stability versus both Gaussian nulls; empirical-chord boundary enrichment versus the path-shift null | Image is the resampling unit. At least two of the four predeclared stage-end cuts, including one nonfinal cut, must have 95% bootstrap intervals favoring the real representation on both geometry measures and enrichment above the 95th null percentile | If passed, run the functional battery; otherwise report the coarse negative result and stop the dense GIF plan |
 | Snapping and recovery | Hard-snap predictive KL versus every same-norm control; $\kappa$ and clean downstream-cell recovery versus matched perturbations | Paired image bootstrap. At least two predeclared cuts must have a 95% interval showing lower hard-snap damage than the controls, $\kappa<1$, and higher cell recovery on empirical-chord perturbations | If passed, freeze the full protocol and train confirmation seeds; otherwise do not infer discrete-state sufficiency |
-| Synthetic recovery | Exact tuple labels up to gauge, support-component error, held-out likelihood, and false positives on unfactored nulls | Across 20 noiseless $(2,3)$ instances: 100% aligned tuple recovery and relative support error $<10^{-8}$ in float64. On the predeclared easy sampled regime: median coordinate AMI $\geq0.9$, held-out likelihood better than every non-oracle baseline, and at most 5 positives among 100 null instances | Real factor discovery remains blocked unless both exact and sampled gates pass |
 | Three-seed confirmation | The predeclared geometry, boundary, snapping, and recovery contrasts above | Training seed is the replication unit; the same two or more cuts must pass with the same effect direction in each of three seeds. Image bootstraps remain within-seed uncertainty and are not counted as model replicates | Only then describe the phenomenon as replicated; module-transplant association remains exploratory |
-| Real algebra | Low-mode stability and held-out operator compression versus occupancy/sampling nulls | Calibrate a threshold with at most 5% false positives on the synthetic/null suite before unblinding real transitions; require a 95% transition-bootstrap interval for positive held-out compression | Otherwise report no useful real symmetry or factor evidence |
 
 The minimum program is:
 
@@ -921,14 +668,14 @@ The minimum program is:
 2. Use the completed small-model activation-geometry collection to choose and freeze a
    quantitative plateau statistic; then run the mechanical and five-checkpoint ResNet
    candidate-cell gates.
-3. Run snapping and recovery only if the candidate cells have held-out and
+3. Specify and build the all-MNIST integrated-Jacobian-barrier plot across layers and
+   training checkpoints, retaining the original pairwise matrices and class-alignment
+   tests behind the embedding.
+4. Run snapping and recovery only if the candidate cells have held-out and
    functional support.
-4. In parallel, validate symmetry and factor recovery on the known synthetic
-   benchmark.
-5. Apply the algebraic methods to real transitions only if both the geometry
-   and synthetic gates pass.
-6. Consider multiscale quotients only after a useful finest-scale state model
-   exists.
+5. Add the noise-scale, commitment, and Fisher-flatness/plasticity comparisons only
+   after their estimands, controls, and uncertainty units are frozen.
+6. Train confirmation seeds only after the exploratory gates justify the cost.
 
 Stop or narrow the language at each failure:
 
@@ -936,21 +683,19 @@ Stop or narrow the language at each failure:
   cells;
 - no contraction: do not use attractor language;
 - no benefit over matched snapping controls: do not infer quantized
-  computation;
-- no synthetic recovery: do not interpret real-data factor outputs;
-- low commutator modes that vanish under resampling or nulls: report no
-  symmetry evidence; and
-- no compression of held-out transitions: report no useful factorization.
+  computation; and
+- no within-class reduction in integrated MNIST barrier relative to the
+  label-permutation null: do not describe the barrier geometry as class-aligned.
 
 ## Implemented scope and unresolved choices
 
 The implementation now includes infrastructure, input/probe materialization, bounded
-Experiment 1 mechanics, a five-checkpoint synthetic/CIFAR activation-geometry
-collection, its synchronized animations, and the tiny-state exact Experiment 2
-subgate. It does **not** run the candidate-cell formation analysis, the coarse or
-functional phenomenon gates, confirmation training, sampled synthetic recovery, or
-real algebra. Those stages remain visible in the DAG as `PLANNED`, with typed
-configuration placeholders where choices are sufficiently specified.
+mechanics, and a five-checkpoint synthetic/CIFAR activation-geometry collection with
+synchronized animations. It does **not** run the candidate-cell formation analysis,
+the coarse or functional phenomenon gates, the all-MNIST barrier geometry,
+noise-scale/Fisher comparisons, or confirmation training. The specified candidate-cell
+stages remain visible in the DAG as `PLANNED`, with typed configuration placeholders
+where choices are sufficiently specified.
 `protocol.mode: confirmatory` is rejected until a future schema can bind it to a
 preregistered full-protocol hash.
 
@@ -962,22 +707,22 @@ proceed:
   plateaus and stable regions, so a future powered run still needs one preregistered
   primary statistic and null;
 - “on/off dataset perturbations” is currently interpreted as input-derived
-  states versus direct, norm-matched residual interventions; and
-- the real transition analysis currently assumes layer-specific codebooks and
-  intertwiners unless a shared cell space earns separate validation.
+  states versus direct, norm-matched residual interventions;
+- the integrated Jacobian barrier still needs a frozen path, response functional,
+  symmetrization rule, numerical quadrature, and feasible all-pairs computation plan;
+  and
+- Fisher flatness, module plasticity, and activation flatness still need separate
+  estimands before any association is tested.
 
 ## Source status
 
-This write-up was developed from the project description, two local notes, and the
-activation-plateau source audit, all read in full and archived or linked here:
+This write-up was developed from the project description, the whiteboard discussion,
+and the activation-plateau source audit:
 
-- [`references/notes/approximate-symmetry-operator-algebra.md`](references/notes/approximate-symmetry-operator-algebra.md)
-- [`references/notes/approximate-factorization-voronoi-residual.md`](references/notes/approximate-factorization-voronoi-residual.md)
 - [`references/activation-plateau-source-audit.md`](references/activation-plateau-source-audit.md)
 
-The mathematical notes provide proposals, not empirical findings. The source audit
-separates the Heimersheim--Mendel real/fake response curves, the SAE study of four
-activation types, the Janiak et al. three-anchor RGB construction, and the
+The source audit separates the Heimersheim--Mendel real/fake response curves, the SAE
+study of four activation types, the Janiak et al. three-anchor RGB construction, and the
 Shinkle--Heimersheim Jacobian work. The local CNN Jacobian surfaces and checkpoint-time
 GIFs are labeled as new hybrid diagnostics rather than source replications.
 

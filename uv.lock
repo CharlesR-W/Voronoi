@@ -800,7 +800,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "scikit-learn" },
-    { name = "scipy" },
 ]
 
 [package.optional-dependencies]
@@ -831,7 +830,6 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12,<1" },
     { name = "scikit-learn", specifier = ">=1.5,<2" },
-    { name = "scipy", specifier = ">=1.12,<2" },
     { name = "torch", marker = "extra == 'resnet'", specifier = ">=2.1" },
     { name = "torchvision", marker = "extra == 'resnet'", specifier = ">=0.16" },
 ]

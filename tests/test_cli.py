@@ -12,7 +12,7 @@ from voronoi_lab.core import RunIndex
 from voronoi_lab.execution import ExperimentRunner, artifact_metadata
 from voronoi_lab.exp1.probe_artifact import build_probe_bank_files
 from voronoi_lab.exp1.torch_mechanics import summarize_resnet_mechanical_evidence
-from voronoi_lab.mechanical import replay_synthetic_invariants, replay_toy_geometry
+from voronoi_lab.mechanical import replay_toy_geometry
 
 
 def _run_mechanical_gate(tmp_path, *, identity, override=False, run_id="fixture-run"):
@@ -128,7 +128,6 @@ def _run_mechanical_gate(tmp_path, *, identity, override=False, run_id="fixture-
                 "jvp_median_relative_error": summary.jvp_median_relative_error,
                 "jvp_p95_relative_error": summary.jvp_p95_relative_error,
             },
-            "synthetic_invariants": replay_synthetic_invariants(context.config.protocol.root_seed),
             "warnings": [],
         }
         return context.store.put_json(
@@ -160,13 +159,15 @@ def test_validate_and_plan_emit_machine_readable_output(capsys) -> None:
     assert cli.main(["validate", "--json"]) == 0
     validated = json.loads(capsys.readouterr().out)
     assert validated["status"] == "VALID"
-    assert "gate.synthetic_exact" in validated["runnable_stages"]
+    assert "gate.mechanical" in validated["runnable_stages"]
 
-    assert cli.main(["plan", "--stage", "gate.synthetic_exact", "--json"]) == 0
+    assert cli.main(["plan", "--stage", "gate.mechanical", "--json"]) == 0
     planned = json.loads(capsys.readouterr().out)
     assert [stage["name"] for stage in planned["stages"]] == [
-        "exp2.exact",
-        "gate.synthetic_exact",
+        "inputs.tracking2",
+        "exp1.probe_banks",
+        "exp1.mechanical",
+        "gate.mechanical",
     ]
 
 
@@ -236,14 +237,14 @@ def test_run_requires_a_target_and_gate_failure_has_strict_exit(monkeypatch, cap
 
         @staticmethod
         def run(_targets):
-            return {"gate.synthetic_exact": SimpleNamespace(artifact_id="a" * 64)}
+            return {"gate.mechanical": SimpleNamespace(artifact_id="a" * 64)}
 
     monkeypatch.setattr(cli, "ExperimentRunner", _Runner)
     monkeypatch.setattr(cli, "default_handlers", lambda: {})
-    status = cli.main(["run", "--stage", "gate.synthetic_exact", "--json"])
+    status = cli.main(["run", "--stage", "gate.mechanical", "--json"])
     assert status == cli.EXIT_GATE_BLOCKED
     result = json.loads(capsys.readouterr().out)
-    assert result["gate_statuses"] == {"gate.synthetic_exact": "FAIL"}
+    assert result["gate_statuses"] == {"gate.mechanical": "FAIL"}
 
 
 def test_artifact_verify_and_gate_inspect(tmp_path, capsys) -> None:

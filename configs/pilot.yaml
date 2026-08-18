@@ -204,46 +204,12 @@ experiment1:
     interval: percentile
     confidence: 0.95
 
-experiment2:
-  oracle_factor_sizes: [2, 3]
-  refinement_factor_sizes: [4, 5]
-  train_primitives: 6
-  heldout_primitives: 3
-  generator_density: 0.5
-  unary_weight: 1.0
-  interaction_rho_values: [0.0, 0.05, 0.2, 0.5]
-  symmetry_delta_values: [0.0, 0.1, 0.5, 1.0]
-  group: cyclic
-  exact_instances: 20
-  null_instances: 100
-  support_penalties: [0.0, 0.0, 1.0, 2.0]
-  exact_protocol:
-    rho: 0.0
-    delta: 1.0
-    support_policy: anchored
-    random_relabel: true
-    max_states: 8
-    generator_rate_shape: 2.0
-    generator_connectivity_policy: mandatory_directed_cycle
-    generator_normalization: unit_mean_exit_rate
-    exhaustive_tie_atol: 1.0e-10
-    exhaustive_tie_rtol: 1.0e-10
-  sampling:
-    tau: 0.1
-    transitions_per_state: 5000
-    # Provisional definition of the easy sampled regime.
-    easy_rho: 0.05
-    easy_delta: 0.1
-
 gates:
   overrides:
     mechanical: null
     coarse: null
     functional: null
-    synthetic_exact: null
-    synthetic: null
     confirmation: null
-    real_algebra: null
   mechanical:
     roundtrip_relative_rms_max: 1.0e-6
     jvp_median_relative_error_max: 0.01
@@ -260,13 +226,6 @@ gates:
     kappa_max: 1.0
     require_higher_clean_cell_recovery: true
     primary_direction: empirical_chord
-  synthetic:
-    noiseless_instances: 20
-    exact_tuple_recovery_fraction_min: 1.0
-    relative_support_error_max: 1.0e-8
-    easy_sampled_median_ami_min: 0.9
-    null_false_positives_max: 5
-    null_instances: 100
   confirmation:
     training_seeds: [0, 1, 2]
     required_passing_cuts: 2
@@ -274,12 +233,6 @@ gates:
     require_same_cuts: true
     require_same_effect_direction: true
     replication_unit: training_seed
-  real_algebra:
-    null_false_positive_rate_max: 0.05
-    confidence: 0.95
-    require_positive_heldout_compression: true
-    calibration_suite: synthetic_and_unfactored_nulls
-
 report:
   output: reports/voronoi_lab.html
   mockup_output: reports/MOCKUP/voronoi_lab_MOCKUP.html

@@ -45,7 +45,6 @@ from voronoi_lab.pipeline import (
     validate_stage_output,
 )
 from voronoi_lab.sharding import (
-    REDUCER_MANIFEST_SCHEMA_VERSION,
     ShardKey,
     ShardSpec,
     ShardValidationError,
@@ -1167,99 +1166,6 @@ def _verify_auxiliary_stages(
     return tuple(artifacts), by_parent
 
 
-def _verify_exact_reducer(
-    store: ArtifactStore,
-    parent_reference: ArtifactRef,
-    shards: Sequence[tuple[ShardSpec, ArtifactRef]],
-) -> ArtifactRef:
-    try:
-        exact = store.read_json(parent_reference.artifact_id, "exact.json")
-    except Exception as error:
-        raise ReceiptError("exp2.exact parent payload is unreadable") from error
-    if not isinstance(exact, dict):
-        raise ReceiptError("exp2.exact parent payload must be an object")
-    ordered_ids = exact.get("ordered_instance_artifact_ids")
-    reducer_id = _digest(exact.get("reducer_artifact_id"), label="exact reducer artifact_id")
-    if (
-        not isinstance(ordered_ids, list)
-        or not ordered_ids
-        or not all(isinstance(item, str) for item in ordered_ids)
-        or len(ordered_ids) != len(set(ordered_ids))
-    ):
-        raise ReceiptError("exp2.exact ordered shard artifact IDs are invalid")
-    if parent_reference.manifest.metadata.get("reducer_artifact_id") != reducer_id:
-        raise ReceiptError("exp2.exact reducer pointer disagrees with parent metadata")
-    by_id = {reference.artifact_id: spec for spec, reference in shards}
-    if set(ordered_ids) != set(by_id) or len(ordered_ids) != len(shards):
-        raise ReceiptError("exp2.exact receipt does not contain the exact reduced shard set")
-    try:
-        reducer = store.get(reducer_id, verify=True)
-        payload = store.read_json(reducer_id, "shards.json")
-    except Exception as error:
-        raise ReceiptError("exp2.exact reducer artifact is unavailable or corrupt") from error
-    if reducer.manifest.kind != "shards/reducer-manifest" or not isinstance(payload, dict):
-        raise ReceiptError("exp2.exact reducer artifact has an invalid kind or payload")
-    if set(payload) != {
-        "ordered_shards",
-        "reducer_manifest_schema_version",
-        "reducer_signature",
-    }:
-        raise ReceiptError("exp2.exact reducer payload has an invalid schema")
-    if (
-        type(payload["reducer_manifest_schema_version"]) is not int
-        or payload["reducer_manifest_schema_version"] != REDUCER_MANIFEST_SCHEMA_VERSION
-    ):
-        raise ReceiptError("exp2.exact reducer schema version is invalid")
-    entries = payload["ordered_shards"]
-    if not isinstance(entries, list) or len(entries) != len(ordered_ids):
-        raise ReceiptError("exp2.exact reducer ordered shard list is invalid")
-    expected_entries: list[dict[str, JSONLike]] = []
-    ordered_specs: list[ShardSpec] = []
-    for ordinal, artifact_id in enumerate(ordered_ids):
-        spec = by_id[artifact_id]
-        ordered_specs.append(spec)
-        expected_entries.append(
-            {
-                "artifact_id": artifact_id,
-                "ordinal": ordinal,
-                "shard_key": spec.key.to_dict(),
-                "shard_key_signature": spec.key.signature,
-                "shard_signature": spec.signature,
-            }
-        )
-    if canonical_hash(entries) != canonical_hash(expected_entries):
-        raise ReceiptError("exp2.exact reducer entries disagree with shard identities")
-    base_identity = ordered_specs[0].reduction_identity
-    if any(
-        canonical_hash(spec.reduction_identity) != canonical_hash(base_identity)
-        for spec in ordered_specs[1:]
-    ):
-        raise ReceiptError("exp2.exact reduced shards have incompatible identities")
-    reducer_signature = canonical_hash(
-        {
-            "domain": "voronoi-lab/shard-reducer/v1",
-            "identity": base_identity,
-            "ordered_shards": expected_entries,
-        }
-    )
-    expected_metadata: dict[str, JSONLike] = {
-        **base_identity,
-        "reducer_manifest_schema_version": REDUCER_MANIFEST_SCHEMA_VERSION,
-        "reducer_signature": reducer_signature,
-        "shard_count": len(expected_entries),
-    }
-    if (
-        payload["reducer_signature"] != reducer_signature
-        or set(reducer.manifest.metadata) != set(expected_metadata)
-        or any(
-            canonical_hash(reducer.manifest.metadata.get(name)) != canonical_hash(value)
-            for name, value in expected_metadata.items()
-        )
-    ):
-        raise ReceiptError("exp2.exact reducer signature or metadata is inconsistent")
-    return reducer
-
-
 def publish_run_receipt(
     store: ArtifactStore,
     index: RunIndex,
@@ -1346,28 +1252,6 @@ def publish_run_receipt(
         if record.stage_name not in stage_name_set
         and record.metadata.get("parent_stage") in stage_name_set
     ]
-    exact_record = main_records.get("exp2.exact")
-    if exact_record is not None and exact_record.artifact_id is not None:
-        exact_payload = store.read_json(exact_record.artifact_id, "exact.json")
-        ordered_ids = (
-            exact_payload.get("ordered_instance_artifact_ids")
-            if isinstance(exact_payload, dict)
-            else None
-        )
-        if isinstance(ordered_ids, list) and all(
-            isinstance(artifact_id, str) for artifact_id in ordered_ids
-        ):
-            observed_ids = {record.artifact_id for record in auxiliary_records}
-            if not set(ordered_ids).issubset(observed_ids):
-                producer_run_id = exact_record.metadata.get("producer_run_id")
-                if isinstance(producer_run_id, str) and producer_run_id != run_id:
-                    auxiliary_records.extend(
-                        record
-                        for record in index.list_stages(producer_run_id)
-                        if record.metadata.get("parent_stage") == "exp2.exact"
-                        and record.artifact_id in set(ordered_ids)
-                        and record.artifact_id not in observed_ids
-                    )
     auxiliary_by_artifact: dict[str, StageRecord] = {}
     for record in auxiliary_records:
         if record.artifact_id is not None:
@@ -1786,21 +1670,13 @@ def verify_run_receipt(
         for entry in raw_stages
         if isinstance(entry, dict) and isinstance(entry.get("stage_name"), str)
     }
-    auxiliary_artifacts, auxiliary_by_parent = _verify_auxiliary_stages(
+    auxiliary_artifacts, _ = _verify_auxiliary_stages(
         store,
         payload["auxiliary_stage_records"],
         main_stage_entries=main_stage_entries,
         source_identity=source_identity,  # type: ignore[arg-type]
     )
     referenced_auxiliary = list(auxiliary_artifacts)
-    if "exp2.exact" in prior_references:
-        reducer = _verify_exact_reducer(
-            store,
-            prior_references["exp2.exact"],
-            auxiliary_by_parent.get("exp2.exact", ()),
-        )
-        referenced_auxiliary.append(reducer)
-
     expected_receipt_metadata: dict[str, object] = {
         "auxiliary_stage_count": len(auxiliary_artifacts),
         "config_hash": config_hash,

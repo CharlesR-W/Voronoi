@@ -1,7 +1,7 @@
 [project]
 name = "voronoi-residual-lab"
 version = "0.1.0"
-description = "Gated experiments on finite-state residual computation and factor recovery"
+description = "Gated experiments on candidate cells and fissures in residual computation"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
@@ -9,7 +9,6 @@ dependencies = [
   "pydantic>=2.7,<3",
   "pyyaml>=6,<7",
   "scikit-learn>=1.5,<2",
-  "scipy>=1.12,<2",
 ]
 
 [project.optional-dependencies]

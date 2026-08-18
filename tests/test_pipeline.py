@@ -19,7 +19,7 @@ from voronoi_lab.core import (
 )
 from voronoi_lab.execution import ExperimentRunner
 from voronoi_lab.exp1.probe_artifact import build_probe_bank_files
-from voronoi_lab.mechanical import replay_synthetic_invariants, replay_toy_geometry
+from voronoi_lab.mechanical import replay_toy_geometry
 from voronoi_lab.pipeline import (
     DEFAULT_STAGES,
     ImplementationStatus,
@@ -44,7 +44,7 @@ def test_default_plan_exposes_real_compute_scale_and_implementation_boundary() -
     assert by_name["exp1.codebooks"].estimated_shards == 5 * 8 * 2 * 3
     assert by_name["exp1.boundary_paths"].estimated_shards == 5 * 4 * 2 * 3 * 4
     assert by_name["exp1.activations"].implementation is ImplementationStatus.PLANNED
-    assert by_name["exp2.exact"].implementation is ImplementationStatus.RUNNABLE
+    assert by_name["report.build"].implementation is ImplementationStatus.RUNNABLE
 
 
 def test_every_runnable_default_stage_declares_a_strict_output_contract() -> None:
@@ -69,7 +69,6 @@ def test_every_runnable_default_stage_declares_a_strict_output_contract() -> Non
     assert all(stage.payload_schema_id for stage in runnable)
     assert {stage.name for stage in runnable if stage.gate_payload_path is not None} == {
         "gate.mechanical",
-        "gate.synthetic_exact",
     }
     assert {
         stage.name: stage.expected_gate_id
@@ -77,7 +76,6 @@ def test_every_runnable_default_stage_declares_a_strict_output_contract() -> Non
         if stage.expected_gate_id is not None
     } == {
         "gate.mechanical": "mechanical",
-        "gate.synthetic_exact": "synthetic_exact",
     }
     assert {
         stage.name: (stage.gate_evidence_dependency, stage.gate_evidence_payload_path)
@@ -85,7 +83,6 @@ def test_every_runnable_default_stage_declares_a_strict_output_contract() -> Non
         if stage.gate_payload_path is not None
     } == {
         "gate.mechanical": ("exp1.mechanical", "mechanical.json"),
-        "gate.synthetic_exact": ("exp2.exact", "exact.json"),
     }
 
 
@@ -240,7 +237,7 @@ def test_target_closure_is_topologically_ordered() -> None:
 
 def test_signature_changes_only_for_declared_inputs() -> None:
     config = load_config("configs/pilot.yaml")
-    stage = DEFAULT_STAGES.get("exp2.exact")
+    stage = DEFAULT_STAGES.get("exp1.synthetic_task")
     base = stage_signature(stage, config, upstream_artifact_ids={}, source_identity={"git": "x"})
     changed_report = config.model_copy(
         update={"report": config.report.model_copy(update={"self_contained": False})}
@@ -376,87 +373,14 @@ def test_producer_signatures_exclude_downstream_gates_and_runtime_policy() -> No
         != mechanical_gate_base
     )
 
-    exact = DEFAULT_STAGES.get("exp2.exact")
-    exact_base = stage_signature(exact, config, upstream_artifact_ids={}, source_identity=source)
-    changed_workers = config.model_copy(
-        update={"runtime": config.runtime.model_copy(update={"workers": 2})}
-    )
-    assert (
-        stage_signature(exact, changed_workers, upstream_artifact_ids={}, source_identity=source)
-        == exact_base
-    )
-    changed_sampled_only = config.model_copy(
-        update={
-            "experiment2": config.experiment2.model_copy(
-                update={"sampling": config.experiment2.sampling.model_copy(update={"tau": 0.2})}
-            )
-        }
-    )
-    assert (
-        stage_signature(
-            exact, changed_sampled_only, upstream_artifact_ids={}, source_identity=source
-        )
-        == exact_base
-    )
-    changed_synthetic_threshold = config.model_copy(
-        update={
-            "gates": config.gates.model_copy(
-                update={
-                    "synthetic": config.gates.synthetic.model_copy(
-                        update={"relative_support_error_max": 2e-8}
-                    )
-                }
-            )
-        }
-    )
-    assert (
-        stage_signature(
-            exact,
-            changed_synthetic_threshold,
-            upstream_artifact_ids={},
-            source_identity=source,
-        )
-        == exact_base
-    )
-    synthetic_gate = DEFAULT_STAGES.get("gate.synthetic_exact")
-    assert stage_signature(
-        synthetic_gate,
-        changed_synthetic_threshold,
-        upstream_artifact_ids={"exp2.exact": "c" * 64},
-        source_identity=source,
-    ) != stage_signature(
-        synthetic_gate,
-        config,
-        upstream_artifact_ids={"exp2.exact": "c" * 64},
-        source_identity=source,
-    )
-
 
 def test_output_contract_is_part_of_the_stage_signature() -> None:
     config = load_config("configs/pilot.yaml")
-    stage = DEFAULT_STAGES.get("exp2.exact")
+    stage = DEFAULT_STAGES.get("exp1.synthetic_task")
     base = stage_signature(stage, config, upstream_artifact_ids={}, source_identity={})
-    revised = replace(stage, expected_artifact_kind="stage/exp2-exact-v2")
+    revised = replace(stage, expected_artifact_kind="stage/exp1-synthetic-task-v2")
 
     assert stage_signature(revised, config, upstream_artifact_ids={}, source_identity={}) != base
-
-    gate_stage = DEFAULT_STAGES.get("gate.synthetic_exact")
-    gate_base = stage_signature(
-        gate_stage,
-        config,
-        upstream_artifact_ids={"exp2.exact": "a" * 64},
-        source_identity={},
-    )
-    swapped_gate = replace(gate_stage, expected_gate_id="different")
-    assert (
-        stage_signature(
-            swapped_gate,
-            config,
-            upstream_artifact_ids={"exp2.exact": "a" * 64},
-            source_identity={},
-        )
-        != gate_base
-    )
 
 
 def test_stage_output_contract_rejects_wrong_kind_missing_payload_and_schema(tmp_path) -> None:
@@ -548,7 +472,6 @@ def test_stage_output_contract_rejects_wrong_kind_missing_payload_and_schema(tmp
         ("inputs.tracking2", "inputs.json", {}),
         ("exp1.probe_banks", "plan.json", {}),
         ("exp1.mechanical", "mechanical.json", {}),
-        ("exp2.exact", "exact.json", {}),
         ("report.build", "report_payload.json", {"report.html": b"<!doctype html>"}),
     ],
 )
@@ -747,7 +670,6 @@ def test_mechanical_contract_rejects_jvp_aggregates_without_completed_cuts(tmp_p
                 "jvp_median_relative_error": 0.0,
                 "jvp_p95_relative_error": 0.0,
             },
-            "synthetic_invariants": replay_synthetic_invariants(config.protocol.root_seed),
             "warnings": [],
         },
         filename="mechanical.json",
@@ -1149,21 +1071,4 @@ def test_planned_join_and_functional_gate_retain_direct_evidence_dependencies() 
     assert DEFAULT_STAGES.get("gate.mechanical").config_paths == (
         "gates.mechanical",
         "gates.overrides.mechanical",
-    )
-    assert DEFAULT_STAGES.get("exp2.exact").config_paths == (
-        "protocol.root_seed",
-        "experiment2.oracle_factor_sizes",
-        "experiment2.train_primitives",
-        "experiment2.heldout_primitives",
-        "experiment2.generator_density",
-        "experiment2.unary_weight",
-        "experiment2.exact_instances",
-        "experiment2.support_penalties",
-        "experiment2.exact_protocol",
-    )
-    assert DEFAULT_STAGES.get("gate.synthetic_exact").config_paths == (
-        "gates.synthetic.noiseless_instances",
-        "gates.synthetic.exact_tuple_recovery_fraction_min",
-        "gates.synthetic.relative_support_error_max",
-        "gates.overrides.synthetic_exact",
     )

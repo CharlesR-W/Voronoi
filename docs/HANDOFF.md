@@ -113,7 +113,18 @@ cap; later billing reconciliation could still adjust the final amount.
    global animation normalization, but publish under a new protocol/run.
 4. For an architecture claim, train matched ResNet and VGG-family models under a shared
    recipe. The current legacy trajectories are insufficient.
-5. Keep the broader candidate-cell, snapping, commutant, and factorization work gated.
+5. Specify the dedicated all-MNIST integrated-Jacobian-barrier analysis across layers
+   and checkpoints. Preserve the full pairwise matrices, test the within-class versus
+   between-class contrast directly, and treat the point layout as descriptive.
+6. Operationalize assignment versus recovery commitment, logarithmic/power-law noise
+   scales, and Fisher-flatness/plasticity comparisons before adding them to a powered
+   protocol.
+7. Keep the broader candidate-cell and snapping/recovery work gated.
+
+The former Experiment 2 synthetic factor-recovery, commutant, operator-decomposition,
+and real-algebra work has been split into the standalone local sibling
+`../../FactorizedDynamics`. Do not add those stages back to this repository merely
+because candidate cells could later provide finite states.
 
 ## Verification
 

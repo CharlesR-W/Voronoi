@@ -73,8 +73,6 @@ def _config(args: argparse.Namespace) -> tuple[Path, LabConfig]:
     root = _project_root(args)
     path = _path_from_root(root, args.config)
     config = load_config(path)
-    if config.experiment2.exact_instances != config.gates.synthetic.noiseless_instances:
-        raise CLIError("experiment2.exact_instances must equal gates.synthetic.noiseless_instances")
     if not config.report.self_contained:
         raise CLIError("only self-contained reports are currently supported")
     if not config.report.embed_spec:

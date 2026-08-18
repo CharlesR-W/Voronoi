@@ -23,15 +23,6 @@ def test_checked_in_pilot_config_is_complete_and_stable() -> None:
         == "residual_update_for_residual_raw_transition_for_nonresidual"
     )
     assert config.experiment1.synthetic_plateau_task.residual_blocks == 4
-    assert config.experiment2.oracle_factor_sizes == (2, 3)
-    assert config.experiment2.exact_protocol.generator_rate_shape == 2.0
-    assert (
-        config.experiment2.exact_protocol.generator_connectivity_policy
-        == "mandatory_directed_cycle"
-    )
-    assert config.experiment2.exact_protocol.generator_normalization == "unit_mean_exit_rate"
-    assert config.experiment2.exact_protocol.exhaustive_tie_atol == 1e-10
-    assert config.experiment2.exact_protocol.exhaustive_tie_rtol == 1e-10
     digest = hashlib.sha256(config.canonical_json().encode()).hexdigest()
     assert len(digest) == 64
 
@@ -125,44 +116,6 @@ def test_boundary_protocol_is_feasible_on_its_declared_grid(boundary_paths) -> N
         )
 
 
-def test_synthetic_null_false_positive_allowance_cannot_exceed_trials() -> None:
-    with pytest.raises(ValidationError, match="null_false_positives_max"):
-        LabConfig.model_validate(
-            {
-                "schema_version": 1,
-                "experiment2": {"null_instances": 3},
-                "gates": {
-                    "synthetic": {
-                        "null_instances": 3,
-                        "null_false_positives_max": 4,
-                    }
-                },
-            }
-        )
-
-
-@pytest.mark.parametrize(
-    "exact_protocol",
-    [
-        {"generator_rate_shape": 0.0},
-        {"generator_connectivity_policy": "optional_cycle"},
-        {"generator_normalization": "none"},
-        {"exhaustive_tie_atol": -1e-10},
-        {"exhaustive_tie_rtol": float("nan")},
-    ],
-)
-def test_exact_protocol_rejects_unsupported_generator_and_search_choices(
-    exact_protocol,
-) -> None:
-    with pytest.raises(ValidationError):
-        LabConfig.model_validate(
-            {
-                "schema_version": 1,
-                "experiment2": {"exact_protocol": exact_protocol},
-            }
-        )
-
-
 def test_cuda_is_an_explicit_supported_runtime_device() -> None:
     config = LabConfig.model_validate(
         {
@@ -198,15 +151,10 @@ def test_cuda_is_an_explicit_supported_runtime_device() -> None:
         {"experiment1": {"synthetic_plateau_task": {"intervention_block": 4}}},
         {"experiment1": {"mechanical_protocol": {"protocol_version": True}}},
         {"experiment1": {"mechanical_protocol": {"input_batch_size": True}}},
-        {"experiment2": {"exact_protocol": {"random_relabel": 1}}},
         {"experiment1": {"boundary_paths": {"finite_difference_delta_r": "0.01"}}},
-        {"experiment2": {"generator_density": "0.5"}},
         {"experiment1": {"bootstrap": {"interval": "basic"}}},
         {"report": {"self_contained": False}},
         {"report": {"embed_spec": False}},
-        {"experiment2": {"oracle_factor_sizes": [2, 5]}},
-        {"experiment2": {"exact_protocol": {"max_states": 9}}},
-        {"experiment2": {"exact_instances": 2}},
     ],
 )
 def test_invalid_or_unsupported_protocol_axes_are_rejected(payload) -> None:
@@ -235,19 +183,12 @@ def test_gate_overrides_are_structured_and_scoped_per_gate() -> None:
         {"schema_version": 1, "gates": {"overrides": {"mechanical": authorization}}}
     )
     assert config.gates.overrides.mechanical is not None
-    assert config.gates.overrides.synthetic_exact is None
+    assert config.gates.overrides.confirmation is None
 
-    wrong_target = {**authorization, "target_gate": "synthetic_exact"}
+    wrong_target = {**authorization, "target_gate": "functional"}
     with pytest.raises(ValidationError, match="must target"):
         LabConfig.model_validate(
             {"schema_version": 1, "gates": {"overrides": {"mechanical": wrong_target}}}
-        )
-
-
-def test_easy_sampled_regime_must_be_part_of_declared_sweep() -> None:
-    with pytest.raises(ValidationError, match="easy_rho"):
-        LabConfig.model_validate(
-            {"schema_version": 1, "experiment2": {"sampling": {"easy_rho": 0.123}}}
         )
 
 

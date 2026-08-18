@@ -10,6 +10,13 @@ MLP and CIFAR-10 with matched ResNet-18 and VGG-19+BN transition shapes at epoch
 5, 20, and 100. It publishes raw intervention data, source-analogue response fields,
 explicitly new Jacobian diagnostics, and four synchronized GIFs.
 
+The project scope is now the activation-geometry question alone: functional flats,
+candidate sensitivity fissures, assignment and recovery commitment, centroid snapping,
+noise-scale response, and their possible relationship to Fisher flatness and module
+plasticity. The former synthetic factor-recovery, commutant, operator-decomposition,
+and real-algebra program is maintained in the standalone local sibling
+`../FactorizedDynamics` rather than as Experiment 2 here.
+
 Canonical run: `exp1-cpu-seed0-20260817-v4`
 
 Public repository: <https://github.com/CharlesR-W/Voronoi>
@@ -63,9 +70,8 @@ plateaus, or residual-stream causality have been established. Specifically:
 - both checkpoint trajectories have `exploratory_legacy` lineage. They lack optimizer,
   scheduler, and RNG state and are unsuitable for a confirmatory architecture claim.
 
-The older candidate-cell formation, boundary, snapping/recovery, three-seed, and real
-algebra gates remain planned. The new activation-geometry collection does not make those
-gates pass.
+The older candidate-cell formation, boundary, snapping/recovery, and three-seed gates
+remain planned. The new activation-geometry collection does not make those gates pass.
 
 ## Next useful work
 
@@ -75,7 +81,11 @@ gates pass.
 3. If the ResNet/VGG contrast remains scientifically important, train matched models
    under one controlled recipe; do not treat the legacy pair as a causal skip-connection
    ablation.
-4. Keep the commutant, factorization, and full candidate-cell program gated as specified
-   in the README.
+4. Specify the dedicated all-MNIST integrated-Jacobian-barrier plot across layers and
+   checkpoints, including exact pairwise-cost outputs, class-alignment summaries, and a
+   computational plan for the quadratic all-pairs target.
+5. Operationalize the whiteboard-motivated noise-scale, assignment/recovery commitment,
+   and Fisher-flatness/plasticity comparisons before adding them to a powered protocol.
+6. Keep the full candidate-cell program gated as specified in the README.
 
 The active continuation notes are in [docs/HANDOFF.md](docs/HANDOFF.md).

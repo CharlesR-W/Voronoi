@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from math import prod
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -529,79 +528,6 @@ class Experiment1Config(StrictModel):
         return self
 
 
-class SyntheticSamplingConfig(StrictModel):
-    tau: Annotated[float, Field(gt=0, strict=True)] = 0.1
-    transitions_per_state: PositiveInt = 5000
-    easy_rho: NonNegativeFloat = 0.05
-    easy_delta: Annotated[float, Field(ge=0, le=1, strict=True)] = 0.1
-
-
-class SyntheticExactProtocolConfig(StrictModel):
-    """Frozen choices specific to the tiny exhaustive optimization subgate."""
-
-    rho: NonNegativeFloat = 0.0
-    delta: Annotated[float, Field(ge=0, le=1, strict=True)] = 1.0
-    support_policy: Literal["anchored", "mixed"] = "anchored"
-    random_relabel: StrictTrue = True
-    max_states: Annotated[int, Field(gt=0, le=8, strict=True)] = 8
-    generator_rate_shape: Annotated[float, Field(gt=0, strict=True)] = 2.0
-    generator_connectivity_policy: Literal["mandatory_directed_cycle"] = "mandatory_directed_cycle"
-    generator_normalization: Literal["unit_mean_exit_rate"] = "unit_mean_exit_rate"
-    exhaustive_tie_atol: NonNegativeFloat = 1e-10
-    exhaustive_tie_rtol: NonNegativeFloat = 1e-10
-
-
-class Experiment2Config(StrictModel):
-    oracle_factor_sizes: tuple[PositiveInt, ...] = (2, 3)
-    refinement_factor_sizes: tuple[PositiveInt, ...] = (4, 5)
-    train_primitives: PositiveInt = 6
-    heldout_primitives: PositiveInt = 3
-    generator_density: Annotated[float, Field(gt=0, le=1, strict=True)] = 0.5
-    unary_weight: Annotated[float, Field(gt=0, strict=True)] = 1.0
-    interaction_rho_values: tuple[NonNegativeFloat, ...] = (0.0, 0.05, 0.2, 0.5)
-    symmetry_delta_values: tuple[Annotated[float, Field(ge=0, le=1, strict=True)], ...] = (
-        0.0,
-        0.1,
-        0.5,
-        1.0,
-    )
-    group: Literal["cyclic"] = "cyclic"
-    exact_instances: PositiveInt = 20
-    null_instances: PositiveInt = 100
-    support_penalties: tuple[NonNegativeFloat, ...] = (0.0, 0.0, 1.0, 2.0)
-    exact_protocol: SyntheticExactProtocolConfig = Field(
-        default_factory=SyntheticExactProtocolConfig
-    )
-    sampling: SyntheticSamplingConfig = Field(default_factory=SyntheticSamplingConfig)
-
-    @model_validator(mode="after")
-    def require_nontrivial_products(self) -> Experiment2Config:
-        if len(self.oracle_factor_sizes) < 2 or len(self.refinement_factor_sizes) < 2:
-            raise ValueError("synthetic benchmarks require at least two factors")
-        if any(size < 2 for size in (*self.oracle_factor_sizes, *self.refinement_factor_sizes)):
-            raise ValueError("every synthetic factor must contain at least two states")
-        for name, values in (
-            ("interaction_rho_values", self.interaction_rho_values),
-            ("symmetry_delta_values", self.symmetry_delta_values),
-        ):
-            if not values or len(set(values)) != len(values):
-                raise ValueError(f"{name} must be nonempty and unique")
-            if tuple(sorted(values)) != values:
-                raise ValueError(f"{name} must be strictly increasing")
-        if any(v > 1 for v in self.symmetry_delta_values):
-            raise ValueError("symmetry_delta_values must be in [0, 1]")
-        if prod(self.oracle_factor_sizes) > self.exact_protocol.max_states:
-            raise ValueError("oracle_factor_sizes exceed exact_protocol.max_states")
-        if len(self.support_penalties) < len(self.oracle_factor_sizes) + 1:
-            raise ValueError("support_penalties must cover every oracle interaction order")
-        if self.support_penalties[:2] != (0.0, 0.0) or any(
-            right < left
-            for left, right in zip(self.support_penalties, self.support_penalties[1:], strict=False)
-        ):
-            raise ValueError("support_penalties must start (0, 0) and be nondecreasing")
-        return self
-
-
 class MechanicalGateConfig(StrictModel):
     roundtrip_relative_rms_max: Annotated[float, Field(gt=0, strict=True)] = 1e-6
     jvp_median_relative_error_max: Annotated[float, Field(gt=0, strict=True)] = 1e-2
@@ -613,21 +539,6 @@ class CoarseGateConfig(StrictModel):
     require_nonfinal_cut: StrictBoolean = True
     confidence: Annotated[float, Field(gt=0, lt=1, strict=True)] = 0.95
     shifted_null_percentile: Annotated[float, Field(gt=0, lt=1, strict=True)] = 0.95
-
-
-class SyntheticGateConfig(StrictModel):
-    noiseless_instances: PositiveInt = 20
-    exact_tuple_recovery_fraction_min: Annotated[float, Field(ge=0, le=1, strict=True)] = 1.0
-    relative_support_error_max: Annotated[float, Field(gt=0, strict=True)] = 1e-8
-    easy_sampled_median_ami_min: Annotated[float, Field(ge=0, le=1, strict=True)] = 0.9
-    null_false_positives_max: NonNegativeInt = 5
-    null_instances: PositiveInt = 100
-
-    @model_validator(mode="after")
-    def validate_null_allowance(self) -> SyntheticGateConfig:
-        if self.null_false_positives_max > self.null_instances:
-            raise ValueError("null_false_positives_max cannot exceed null_instances")
-        return self
 
 
 class FunctionalGateConfig(StrictModel):
@@ -654,13 +565,6 @@ class ConfirmationGateConfig(StrictModel):
         return self
 
 
-class RealAlgebraGateConfig(StrictModel):
-    null_false_positive_rate_max: Annotated[float, Field(gt=0, le=0.05, strict=True)] = 0.05
-    confidence: Annotated[float, Field(gt=0, lt=1, strict=True)] = 0.95
-    require_positive_heldout_compression: StrictTrue = True
-    calibration_suite: Literal["synthetic_and_unfactored_nulls"] = "synthetic_and_unfactored_nulls"
-
-
 class GateOverrideAuthorization(StrictModel):
     """Auditable authorization for one named gate, never a global bypass."""
 
@@ -668,10 +572,7 @@ class GateOverrideAuthorization(StrictModel):
         "mechanical",
         "coarse",
         "functional",
-        "synthetic_exact",
-        "synthetic",
         "confirmation",
-        "real_algebra",
     ]
     scope: Literal["gate"] = "gate"
     mode: Literal["diagnostic_only"] = "diagnostic_only"
@@ -698,10 +599,7 @@ class GateOverridesConfig(StrictModel):
     mechanical: GateOverrideAuthorization | None = None
     coarse: GateOverrideAuthorization | None = None
     functional: GateOverrideAuthorization | None = None
-    synthetic_exact: GateOverrideAuthorization | None = None
-    synthetic: GateOverrideAuthorization | None = None
     confirmation: GateOverrideAuthorization | None = None
-    real_algebra: GateOverrideAuthorization | None = None
 
     @model_validator(mode="after")
     def validate_targets(self) -> GateOverridesConfig:
@@ -709,10 +607,7 @@ class GateOverridesConfig(StrictModel):
             ("mechanical", self.mechanical),
             ("coarse", self.coarse),
             ("functional", self.functional),
-            ("synthetic_exact", self.synthetic_exact),
-            ("synthetic", self.synthetic),
             ("confirmation", self.confirmation),
-            ("real_algebra", self.real_algebra),
         ):
             if authorization is not None and authorization.target_gate != target:
                 raise ValueError(f"{target} override must target {target!r}")
@@ -723,9 +618,7 @@ class GatesConfig(StrictModel):
     mechanical: MechanicalGateConfig = Field(default_factory=MechanicalGateConfig)
     coarse: CoarseGateConfig = Field(default_factory=CoarseGateConfig)
     functional: FunctionalGateConfig = Field(default_factory=FunctionalGateConfig)
-    synthetic: SyntheticGateConfig = Field(default_factory=SyntheticGateConfig)
     confirmation: ConfirmationGateConfig = Field(default_factory=ConfirmationGateConfig)
-    real_algebra: RealAlgebraGateConfig = Field(default_factory=RealAlgebraGateConfig)
     overrides: GateOverridesConfig = Field(default_factory=GateOverridesConfig)
 
 
@@ -742,7 +635,6 @@ class LabConfig(StrictModel):
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     inputs: InputsConfig = Field(default_factory=InputsConfig)
     experiment1: Experiment1Config = Field(default_factory=Experiment1Config)
-    experiment2: Experiment2Config = Field(default_factory=Experiment2Config)
     gates: GatesConfig = Field(default_factory=GatesConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
 
@@ -753,12 +645,6 @@ class LabConfig(StrictModel):
                 "confirmatory mode is not yet supported: freeze and register the full "
                 "protocol hash before enabling confirmatory claims"
             )
-        if self.experiment2.exact_instances != self.gates.synthetic.noiseless_instances:
-            raise ValueError(
-                "experiment2.exact_instances must equal gates.synthetic.noiseless_instances"
-            )
-        if self.experiment2.null_instances != self.gates.synthetic.null_instances:
-            raise ValueError("experiment2.null_instances must equal gates.synthetic.null_instances")
         available_sentinel_cuts = len(self.experiment1.sentinel_cuts)
         for gate_name, required in (
             ("coarse", self.gates.coarse.required_passing_sentinel_cuts),
@@ -770,10 +656,6 @@ class LabConfig(StrictModel):
                     f"gates.{gate_name} required passing cuts cannot exceed the "
                     f"{available_sentinel_cuts} available sentinel cuts"
                 )
-        if self.experiment2.sampling.easy_rho not in self.experiment2.interaction_rho_values:
-            raise ValueError("sampling.easy_rho must be included in interaction_rho_values")
-        if self.experiment2.sampling.easy_delta not in self.experiment2.symmetry_delta_values:
-            raise ValueError("sampling.easy_delta must be included in symmetry_delta_values")
         if (
             self.experiment1.confirmation_training.training_seeds
             != self.gates.confirmation.training_seeds

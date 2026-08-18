@@ -6,7 +6,7 @@ import io
 import json
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from enum import StrEnum
 from math import ceil
@@ -40,7 +40,7 @@ from voronoi_lab.exp1.tracking2 import (
     parse_tracking2_manifest_bytes,
 )
 from voronoi_lab.exp1.tracking2_vgg import parse_tracking2_vgg_manifest_bytes
-from voronoi_lab.mechanical import replay_synthetic_invariants, replay_toy_geometry
+from voronoi_lab.mechanical import replay_toy_geometry
 
 
 class PipelineError(ValueError):
@@ -529,37 +529,6 @@ def expected_gate_rule(stage: StageSpec | str, config: LabConfig) -> GateRule:
                     ComparisonOperator.LT,
                     thresholds.jvp_p95_relative_error_max,
                 ),
-                GateCheck(
-                    "generator_twirl_support",
-                    "synthetic_invariants.passed",
-                    ComparisonOperator.IS_TRUE,
-                ),
-            ),
-        )
-    if name == "gate.synthetic_exact":
-        thresholds = config.gates.synthetic
-        return GateRule(
-            gate_id="synthetic_exact",
-            description="Noiseless exhaustive recovery prerequisite for sampled recovery.",
-            checks=(
-                GateCheck(
-                    "instance_count",
-                    "instances",
-                    ComparisonOperator.EQ,
-                    thresholds.noiseless_instances,
-                ),
-                GateCheck(
-                    "exact_tuple_recovery",
-                    "exact_tuple_recovery_fraction",
-                    ComparisonOperator.GE,
-                    thresholds.exact_tuple_recovery_fraction_min,
-                ),
-                GateCheck(
-                    "support_component_error",
-                    "worst_support_error",
-                    ComparisonOperator.LT,
-                    thresholds.relative_support_error_max,
-                ),
             ),
         )
     raise PipelineError(f"no frozen runnable gate rule is registered for {name}")
@@ -573,7 +542,6 @@ def expected_gate_override_authorization(
     name = stage.name if isinstance(stage, StageSpec) else stage
     authorizations = {
         "gate.mechanical": config.gates.overrides.mechanical,
-        "gate.synthetic_exact": config.gates.overrides.synthetic_exact,
     }
     if name not in authorizations:
         raise PipelineError(f"no runnable gate override slot is registered for {name}")
@@ -1118,7 +1086,7 @@ def _validate_mechanical_payload(
     label = "mechanical result"
     _require_fields(
         payload,
-        ("geometry", "probe_banks", "protocol", "resnet", "synthetic_invariants", "warnings"),
+        ("geometry", "probe_banks", "protocol", "resnet", "warnings"),
         label=label,
     )
     if config is None:
@@ -1163,9 +1131,6 @@ def _validate_mechanical_payload(
     )
     if canonical_hash(payload["geometry"]) != canonical_hash(expected_geometry):
         raise PipelineError(f"{label} geometry does not match deterministic replay")
-    expected_invariants = replay_synthetic_invariants(config.protocol.root_seed)
-    if canonical_hash(payload["synthetic_invariants"]) != canonical_hash(expected_invariants):
-        raise PipelineError(f"{label} synthetic invariants do not match deterministic replay")
     geometry = _as_object(payload["geometry"], label=f"{label} geometry")
     _require_fields(
         geometry,
@@ -1331,227 +1296,9 @@ def _validate_mechanical_payload(
         != summary.jvp_p95_relative_error
     ):
         raise PipelineError(f"{label} JVP aggregates disagree with saved raw outputs")
-    invariants = _as_object(payload["synthetic_invariants"], label=f"{label} synthetic_invariants")
-    if not isinstance(invariants.get("passed"), bool):
-        raise PipelineError(f"{label} synthetic invariant status must be boolean")
     warnings = _as_array(payload["warnings"], label=f"{label} warnings")
     if any(not isinstance(warning, str) for warning in warnings):
         raise PipelineError(f"{label} warnings must contain strings")
-
-
-def _validate_exact_payload(
-    payload: Mapping[str, object],
-    reference: ArtifactRef,
-    store: ArtifactStore,
-    config: LabConfig | None,
-) -> None:
-    label = "synthetic exact result"
-    _require_fields(
-        payload,
-        (
-            "aggregate",
-            "exact_instances",
-            "exact_tuple_recovery_fraction",
-            "factor_sizes",
-            "instance_results",
-            "instances",
-            "numeric_dtype",
-            "ordered_instance_artifact_ids",
-            "protocol_version",
-            "reducer_artifact_id",
-            "worst_support_error",
-        ),
-        label=label,
-    )
-    instances = _as_int(payload["instances"], label=f"{label} instances", minimum=1)
-    exact_instances = _as_int(
-        payload["exact_instances"], label=f"{label} exact_instances", minimum=0
-    )
-    if exact_instances > instances:
-        raise PipelineError(f"{label} exact_instances exceeds instances")
-    fraction = _as_number(
-        payload["exact_tuple_recovery_fraction"], label=f"{label} recovery fraction"
-    )
-    if abs(fraction - exact_instances / instances) > 1e-15:
-        raise PipelineError(f"{label} recovery fraction is inconsistent")
-    if payload["numeric_dtype"] != "float64":
-        raise PipelineError(f"{label} must record float64 numeric_dtype")
-    if config is None:
-        raise PipelineError(f"{label} validation requires the signed run configuration")
-    experiment = config.experiment2
-    protocol = experiment.exact_protocol
-    instance_rows = _as_array(payload["instance_results"], label=f"{label} instance_results")
-    artifact_ids = _as_array(
-        payload["ordered_instance_artifact_ids"], label=f"{label} instance artifact ids"
-    )
-    if len(instance_rows) != instances or len(artifact_ids) != instances:
-        raise PipelineError(f"{label} instance evidence count is inconsistent")
-    if len(set(artifact_ids)) != instances or any(
-        not isinstance(artifact_id, str) or not _DIGEST_RE.fullmatch(artifact_id)
-        for artifact_id in artifact_ids
-    ):
-        raise PipelineError(f"{label} instance artifact ids are invalid")
-    from voronoi_lab.synthetic.runner import (
-        OracleExhaustiveInstanceResult,
-        run_oracle_exhaustive_instance,
-        summarize_oracle_exhaustive_instances,
-    )
-
-    instance_fields = set(OracleExhaustiveInstanceResult.__dataclass_fields__)
-    reconstructed: list[OracleExhaustiveInstanceResult] = []
-    for expected_index, (raw_row, artifact_id) in enumerate(
-        zip(instance_rows, artifact_ids, strict=True)
-    ):
-        row = _as_object(raw_row, label=f"{label} instance {expected_index}")
-        if set(row) != instance_fields:
-            raise PipelineError(f"{label} instance {expected_index} has invalid fields")
-        if row["instance_index"] != expected_index:
-            raise PipelineError(f"{label} instance ordering is inconsistent")
-        for integer_field in ("instance_index", "seed", "best_tie_count", "evaluated_labelings"):
-            _as_int(row[integer_field], label=f"{label} {integer_field}", minimum=0)
-        if not isinstance(row["exact"], bool):
-            raise PipelineError(f"{label} instance exact must be boolean")
-        for numeric_field in (
-            "train_support_error",
-            "heldout_support_error",
-            "train_objective",
-            "heldout_objective",
-            "heldout_oracle_objective",
-        ):
-            _as_nonnegative_number(row[numeric_field], label=f"{label} {numeric_field}")
-        excess = _as_number(
-            row["heldout_excess_objective"], label=f"{label} heldout_excess_objective"
-        )
-        if not np.isfinite(excess):
-            raise PipelineError(f"{label} heldout_excess_objective must be finite")
-        for sequence_field in (
-            "observed_primitive_names",
-            "observed_generator_family",
-            "realized_normalized_support_order_spectrum",
-            "train_primitive_indices",
-            "heldout_primitive_indices",
-            "truth_labeling",
-            "selected_labeling",
-        ):
-            _as_array(row[sequence_field], label=f"{label} {sequence_field}")
-        for value_field, hash_field in (
-            ("observed_generator_family", "observed_generator_family_hash"),
-            (
-                "realized_normalized_support_order_spectrum",
-                "realized_normalized_support_order_spectrum_hash",
-            ),
-            ("selected_labeling", "selected_labeling_hash"),
-            ("truth_labeling", "truth_labeling_hash"),
-        ):
-            if row[hash_field] != canonical_hash(row[value_field]):
-                raise PipelineError(
-                    f"{label} instance {expected_index} has inconsistent {hash_field}"
-                )
-        try:
-            reconstructed_row = OracleExhaustiveInstanceResult(**row)  # type: ignore[arg-type]
-        except TypeError as error:
-            raise PipelineError(
-                f"{label} instance {expected_index} cannot be reconstructed"
-            ) from error
-        try:
-            replayed_row = run_oracle_exhaustive_instance(
-                seed=config.protocol.root_seed,
-                instance_index=expected_index,
-                factor_sizes=experiment.oracle_factor_sizes,
-                train_primitives=experiment.train_primitives,
-                heldout_primitives=experiment.heldout_primitives,
-                density=experiment.generator_density,
-                unary_weight=experiment.unary_weight,
-                rho=protocol.rho,
-                delta=protocol.delta,
-                support_policy=protocol.support_policy,
-                random_relabel=protocol.random_relabel,
-                penalties=experiment.support_penalties,
-                max_states=protocol.max_states,
-                generator_rate_shape=protocol.generator_rate_shape,
-                generator_connectivity_policy=protocol.generator_connectivity_policy,
-                generator_normalization=protocol.generator_normalization,
-                exhaustive_tie_atol=protocol.exhaustive_tie_atol,
-                exhaustive_tie_rtol=protocol.exhaustive_tie_rtol,
-            )
-        except (TypeError, ValueError) as error:
-            raise PipelineError(f"{label} instance {expected_index} cannot be replayed") from error
-        if canonical_hash(asdict(replayed_row)) != canonical_hash(row):
-            raise PipelineError(
-                f"{label} instance {expected_index} does not match deterministic replay"
-            )
-        reconstructed.append(reconstructed_row)
-        child = store.get(artifact_id, verify=True)  # type: ignore[arg-type]
-        if child.manifest.kind != "shard/exp2-exact-instance":
-            raise PipelineError(f"{label} instance {expected_index} has the wrong artifact kind")
-        child_payload = store.read_json(child.artifact_id, "instance.json")
-        child_object = _as_object(child_payload, label=f"{label} instance shard")
-        if child_object.get("schema_version") != 1 or canonical_hash(
-            child_object.get("instance")
-        ) != canonical_hash(row):
-            raise PipelineError(f"{label} instance shard content is inconsistent")
-
-    reducer_id = payload["reducer_artifact_id"]
-    if not isinstance(reducer_id, str) or not _DIGEST_RE.fullmatch(reducer_id):
-        raise PipelineError(f"{label} reducer artifact id is invalid")
-    if reference.manifest.metadata.get("reducer_artifact_id") != reducer_id:
-        raise PipelineError(f"{label} reducer metadata is inconsistent")
-    reducer = store.get(reducer_id, verify=True)
-    if reducer.manifest.kind != "shards/reducer-manifest":
-        raise PipelineError(f"{label} reducer has the wrong artifact kind")
-    reducer_payload = _as_object(
-        store.read_json(reducer.artifact_id, "shards.json"), label=f"{label} reducer"
-    )
-    ordered = _as_array(reducer_payload.get("ordered_shards"), label=f"{label} reducer shards")
-    reducer_ids = [
-        _as_object(entry, label=f"{label} reducer entry").get("artifact_id") for entry in ordered
-    ]
-    if list(artifact_ids) != reducer_ids:
-        raise PipelineError(f"{label} reducer ordering is inconsistent")
-
-    try:
-        smoke = summarize_oracle_exhaustive_instances(
-            reconstructed,
-            seed=config.protocol.root_seed,
-            factor_sizes=experiment.oracle_factor_sizes,
-            train_primitives=experiment.train_primitives,
-            heldout_primitives=experiment.heldout_primitives,
-            density=experiment.generator_density,
-            unary_weight=experiment.unary_weight,
-            rho=protocol.rho,
-            delta=protocol.delta,
-            support_policy=protocol.support_policy,
-            random_relabel=protocol.random_relabel,
-            penalties=experiment.support_penalties,
-            max_states=protocol.max_states,
-            generator_rate_shape=protocol.generator_rate_shape,
-            generator_connectivity_policy=protocol.generator_connectivity_policy,
-            generator_normalization=protocol.generator_normalization,
-            exhaustive_tie_atol=protocol.exhaustive_tie_atol,
-            exhaustive_tie_rtol=protocol.exhaustive_tie_rtol,
-        )
-    except (TypeError, ValueError) as error:
-        raise PipelineError(f"{label} rows do not satisfy the signed protocol") from error
-    aggregate: dict[str, JSONLike] = {
-        "evaluated_labelings": smoke.evaluated_labelings,
-        "exact_instances": smoke.exact_instances,
-        "exact_tuple_recovery_fraction": smoke.exact_instances / smoke.instances,
-        "max_best_objective": smoke.max_best_objective,
-        "max_heldout_excess_objective": smoke.max_heldout_excess_objective,
-        "worst_support_error": smoke.worst_support_error,
-        "worst_train_support_error": smoke.worst_train_support_error,
-    }
-    expected_payload: dict[str, JSONLike] = {
-        "schema_version": 1,
-        **asdict(smoke),
-        "exact_tuple_recovery_fraction": smoke.exact_instances / smoke.instances,
-        "numeric_dtype": "float64",
-        "aggregate": aggregate,
-        "ordered_instance_artifact_ids": list(artifact_ids),
-        "reducer_artifact_id": reducer_id,
-    }
-    if canonical_hash(payload) != canonical_hash(expected_payload):
-        raise PipelineError(f"{label} aggregate does not match its signed instance evidence")
 
 
 def _validate_mock_report_payload(
@@ -3049,8 +2796,6 @@ def _validate_named_payload_schema(
         _validate_probe_artifact(payloads["plan.json"], declared_paths, reference, store, config)
     elif schema_id == "mechanical-result-v1":
         _validate_mechanical_payload(payloads["mechanical.json"], config, reference, store)
-    elif schema_id == "synthetic-exact-result-v1":
-        _validate_exact_payload(payloads["exact.json"], reference, store, config)
     elif schema_id == "mock-report-v1":
         _validate_mock_report_payload(payloads["report_payload.json"], reference, store)
     else:
@@ -3188,19 +2933,6 @@ def _validation_referenced_artifact_ids(
             for artifact_id in upstreams.values()
             if isinstance(artifact_id, str) and _DIGEST_RE.fullmatch(artifact_id)
         )
-    if stage.payload_schema_id == "synthetic-exact-result-v1":
-        payload = json_payloads.get("exact.json")
-        if payload is not None:
-            reducer_id = payload.get("reducer_artifact_id")
-            if isinstance(reducer_id, str) and _DIGEST_RE.fullmatch(reducer_id):
-                referenced.add(reducer_id)
-            instance_ids = payload.get("ordered_instance_artifact_ids")
-            if isinstance(instance_ids, Sequence) and not isinstance(instance_ids, (str, bytes)):
-                referenced.update(
-                    artifact_id
-                    for artifact_id in instance_ids
-                    if isinstance(artifact_id, str) and _DIGEST_RE.fullmatch(artifact_id)
-                )
     if stage.payload_schema_id == "plateau-cifar-collection-v2":
         payload = json_payloads.get("summary.json")
         if payload is not None:
@@ -3487,10 +3219,6 @@ def _boundary_shards(config: LabConfig) -> int:
     )
 
 
-def _synthetic_exact_shards(config: LabConfig) -> int:
-    return config.experiment2.exact_instances
-
-
 DEFAULT_STAGES = StageRegistry(
     (
         StageSpec(
@@ -3724,80 +3452,6 @@ DEFAULT_STAGES = StageRegistry(
             "Evaluate training-seed replication without treating image bootstraps as replicates.",
             dependencies=("exp1.confirmation", "gate.functional"),
             config_paths=("gates.confirmation", "gates.overrides.confirmation"),
-        ),
-        StageSpec(
-            "exp2.exact",
-            "Run the narrow tiny-state oracle/exhaustive optimization subgate; sampled and "
-            "symmetry-limit evidence remain separate.",
-            # Worker count is execution policy recorded by the run receipt, not
-            # scientific identity; sequential and threaded runs share shards.
-            config_paths=(
-                "protocol.root_seed",
-                "experiment2.oracle_factor_sizes",
-                "experiment2.train_primitives",
-                "experiment2.heldout_primitives",
-                "experiment2.generator_density",
-                "experiment2.unary_weight",
-                "experiment2.exact_instances",
-                "experiment2.support_penalties",
-                "experiment2.exact_protocol",
-            ),
-            implementation=ImplementationStatus.RUNNABLE,
-            estimate_shards=_synthetic_exact_shards,
-            expected_artifact_kind="stage/exp2-exact",
-            required_payload_paths=("exact.json",),
-            result_schema_version=1,
-            payload_schema_id="synthetic-exact-result-v1",
-        ),
-        StageSpec(
-            "gate.synthetic_exact",
-            "Evaluate exact tuple recovery and support-component error.",
-            dependencies=("exp2.exact",),
-            config_paths=(
-                "gates.synthetic.noiseless_instances",
-                "gates.synthetic.exact_tuple_recovery_fraction_min",
-                "gates.synthetic.relative_support_error_max",
-                "gates.overrides.synthetic_exact",
-            ),
-            implementation=ImplementationStatus.RUNNABLE,
-            expected_artifact_kind="gate/synthetic-exact",
-            required_payload_paths=("gate.json",),
-            result_schema_version=1,
-            payload_schema_id="gate-result-v1",
-            gate_payload_path="gate.json",
-            expected_gate_id="synthetic_exact",
-            gate_evidence_dependency="exp2.exact",
-            gate_evidence_payload_path="exact.json",
-        ),
-        StageSpec(
-            "exp2.sampled",
-            "Run held-out sampled recovery, interaction/symmetry sweeps, baselines, and nulls.",
-            dependencies=("gate.synthetic_exact",),
-            config_paths=("experiment2",),
-        ),
-        StageSpec(
-            "gate.synthetic",
-            "Evaluate the sampled recovery and calibrated false-positive rules.",
-            dependencies=("exp2.sampled", "gate.synthetic_exact"),
-            config_paths=("gates.synthetic", "gates.overrides.synthetic"),
-        ),
-        StageSpec(
-            "real.transitions",
-            "Estimate same-grid rectangular real cell transitions on held-out contexts.",
-            dependencies=("gate.functional", "exp1.codebooks", "exp1.activations"),
-            config_paths=("experiment1",),
-        ),
-        StageSpec(
-            "real.algebra",
-            "Run occupied-subspace intertwiners and held-out factor compression.",
-            dependencies=("real.transitions", "gate.synthetic", "gate.functional"),
-            config_paths=("experiment1", "experiment2"),
-        ),
-        StageSpec(
-            "gate.real_algebra",
-            "Evaluate calibrated real-factor compression against synthetic and null controls.",
-            dependencies=("real.algebra", "gate.synthetic", "gate.functional"),
-            config_paths=("gates.real_algebra", "gates.overrides.real_algebra"),
         ),
         StageSpec(
             "report.build",

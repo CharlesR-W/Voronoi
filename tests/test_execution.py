@@ -38,7 +38,7 @@ def _fixture_registry() -> StageRegistry:
             StageSpec(
                 "fixture",
                 "fixture stage",
-                config_paths=("protocol.root_seed", "experiment2.oracle_factor_sizes"),
+                config_paths=("protocol.root_seed", "experiment1.checkpoints"),
                 implementation=ImplementationStatus.RUNNABLE,
             ),
         )
@@ -270,7 +270,6 @@ def test_runner_validates_gate_evidence_through_its_custom_registry(tmp_path) ->
                 "jvp_median_relative_error": 0.0,
                 "jvp_p95_relative_error": 0.0,
             },
-            "synthetic_invariants": {"passed": True},
         }
         return context.store.put_json(
             observations,

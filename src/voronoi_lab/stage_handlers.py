@@ -14,8 +14,6 @@ import json
 import os
 import tempfile
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -52,16 +50,11 @@ from voronoi_lab.exp1.tracking2_vgg import (
     Tracking2VGGAdapter,
     parse_tracking2_vgg_manifest_bytes,
 )
-from voronoi_lab.mechanical import replay_synthetic_invariants, replay_toy_geometry
+from voronoi_lab.mechanical import replay_toy_geometry
 from voronoi_lab.pipeline import expected_gate_rule, stage_config
 from voronoi_lab.reporting.builder import render_report
 from voronoi_lab.reporting.payload import make_mock_payload
 from voronoi_lab.sharding import ShardContext, ShardExecutor, ShardKey, ShardReducer, ShardSpec
-from voronoi_lab.synthetic import (
-    OracleExhaustiveInstanceResult,
-    run_oracle_exhaustive_instance,
-    summarize_oracle_exhaustive_instances,
-)
 
 RESULT_SCHEMA_VERSION = 1
 PLATEAU_RESULT_SCHEMA_VERSION = 2
@@ -1702,7 +1695,6 @@ def handle_exp1_mechanical(
             "distinct_train_test_sources": distinct_train_test_sources,
         },
         "resnet": resnet,
-        "synthetic_invariants": replay_synthetic_invariants(context.config.protocol.root_seed),
         "warnings": warnings,
     }
     return context.store.put_json(
@@ -1741,245 +1733,6 @@ def handle_gate_mechanical(
         result.to_dict(),
         filename="gate.json",
         kind="gate/mechanical",
-        metadata=_stage_metadata(
-            context,
-            dependencies,
-            gate_id=result.gate_id,
-            gate_status=result.status.value,
-            gate_rule_signature=canonical_hash(rule.to_dict()),
-            natural_status=result.natural_status.value,
-            override_authorization=(
-                None if authorization is None else authorization.model_dump(mode="json")
-            ),
-        ),
-    )
-
-
-def handle_exp2_exact(
-    context: StageContext, dependencies: Mapping[str, ArtifactRef]
-) -> ArtifactRef:
-    if dependencies:
-        raise StageHandlerError("exp2.exact must not receive dependency artifacts")
-    parent_record = context.index.get_stage(context.run_id, context.stage_spec.name)
-    if parent_record is None or parent_record.state is not StageState.RUNNING:
-        raise StageHandlerError(
-            "exp2.exact shards require their parent stage to be claimed RUNNING"
-        )
-    experiment = context.config.experiment2
-    protocol = experiment.exact_protocol
-    protocol_payload: dict[str, JSONLike] = {
-        "delta": protocol.delta,
-        "density": experiment.generator_density,
-        "exhaustive_tie_atol": protocol.exhaustive_tie_atol,
-        "exhaustive_tie_rtol": protocol.exhaustive_tie_rtol,
-        "factor_sizes": list(experiment.oracle_factor_sizes),
-        "generator_connectivity_policy": protocol.generator_connectivity_policy,
-        "generator_normalization": protocol.generator_normalization,
-        "generator_rate_shape": protocol.generator_rate_shape,
-        "heldout_primitives": experiment.heldout_primitives,
-        "max_states": protocol.max_states,
-        "numeric_dtype": "float64",
-        "penalties": list(experiment.support_penalties),
-        "protocol_version": 1,
-        "random_relabel": protocol.random_relabel,
-        "rho": protocol.rho,
-        "root_seed": context.config.protocol.root_seed,
-        "seed_namespace": ["exp2", "exact", "oracle_exhaustive", "v1"],
-        "support_policy": protocol.support_policy,
-        "train_primitives": experiment.train_primitives,
-        "unary_weight": experiment.unary_weight,
-    }
-    selected_config = stage_config(context.config, context.stage_spec.config_paths)
-    specs = tuple(
-        ShardSpec(
-            parent_stage=context.stage_spec.name,
-            parent_stage_signature=parent_record.stage_signature,
-            key=ShardKey({"instance_index": instance_index}),
-            artifact_kind="shard/exp2-exact-instance",
-            stage_config=selected_config,
-            source_identity=context.source_identity,
-            upstream_artifacts={},
-        )
-        for instance_index in range(experiment.exact_instances)
-    )
-
-    def execute_instance(spec: ShardSpec) -> ArtifactRef:
-        instance_index = spec.key.coordinates["instance_index"]
-        if type(instance_index) is not int:
-            raise StageHandlerError("exact shard instance index must be an integer")
-
-        def publish(shard_context: ShardContext) -> ArtifactRef:
-            instance = run_oracle_exhaustive_instance(
-                seed=context.config.protocol.root_seed,
-                instance_index=instance_index,
-                factor_sizes=experiment.oracle_factor_sizes,
-                train_primitives=experiment.train_primitives,
-                heldout_primitives=experiment.heldout_primitives,
-                density=experiment.generator_density,
-                unary_weight=experiment.unary_weight,
-                rho=protocol.rho,
-                delta=protocol.delta,
-                support_policy=protocol.support_policy,
-                random_relabel=protocol.random_relabel,
-                penalties=experiment.support_penalties,
-                max_states=protocol.max_states,
-                generator_rate_shape=protocol.generator_rate_shape,
-                generator_connectivity_policy=protocol.generator_connectivity_policy,
-                generator_normalization=protocol.generator_normalization,
-                exhaustive_tie_atol=protocol.exhaustive_tie_atol,
-                exhaustive_tie_rtol=protocol.exhaustive_tie_rtol,
-            )
-            return shard_context.store.put_json(
-                {
-                    "schema_version": RESULT_SCHEMA_VERSION,
-                    "protocol": protocol_payload,
-                    "instance": asdict(instance),
-                },
-                filename="instance.json",
-                kind=spec.artifact_kind,
-                metadata=shard_context.artifact_metadata(
-                    {
-                        "evidence_class": "synthetic_oracle_instance",
-                        "instance_index": instance_index,
-                        "observed_generator_family_hash": (instance.observed_generator_family_hash),
-                        "result_schema_version": RESULT_SCHEMA_VERSION,
-                    }
-                ),
-            )
-
-        return ShardExecutor(
-            context.store,
-            context.index,
-            context.run_id,
-        ).execute(spec, publish)
-
-    workers = context.config.runtime.workers
-    if workers == 0:
-        instance_refs = tuple(execute_instance(spec) for spec in specs)
-    else:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            instance_refs = tuple(pool.map(execute_instance, specs))
-
-    reduction = ShardReducer(context.store, context.index, context.run_id).publish(specs)
-    reducer_ids = tuple(reference.artifact_id for reference in reduction.shard_artifacts)
-    executed_ids = tuple(reference.artifact_id for reference in instance_refs)
-    if executed_ids != reducer_ids:
-        raise StageHandlerError("ordered reducer inputs differ from executed exact shards")
-
-    instance_results: list[OracleExhaustiveInstanceResult] = []
-    expected_fields = set(OracleExhaustiveInstanceResult.__dataclass_fields__)
-    for expected_index, reference in enumerate(reduction.shard_artifacts):
-        payload = _json_object(context, reference, "instance.json")
-        raw_instance = payload.get("instance")
-        if not isinstance(raw_instance, Mapping) or set(raw_instance) != expected_fields:
-            raise StageHandlerError("exact instance shard has an invalid result schema")
-        if canonical_hash(payload.get("protocol")) != canonical_hash(protocol_payload):
-            raise StageHandlerError("exact instance shard has incompatible protocol evidence")
-        try:
-            instance = OracleExhaustiveInstanceResult(**raw_instance)  # type: ignore[arg-type]
-        except TypeError as error:
-            raise StageHandlerError("exact instance shard cannot be reconstructed") from error
-        if instance.instance_index != expected_index:
-            raise StageHandlerError("exact instance shard order does not match its global index")
-        evidence_hashes = {
-            "observed_generator_family_hash": canonical_hash(
-                raw_instance["observed_generator_family"]  # type: ignore[arg-type]
-            ),
-            "realized_normalized_support_order_spectrum_hash": canonical_hash(
-                raw_instance[  # type: ignore[arg-type]
-                    "realized_normalized_support_order_spectrum"
-                ]
-            ),
-            "truth_labeling_hash": canonical_hash(
-                raw_instance["truth_labeling"]  # type: ignore[arg-type]
-            ),
-            "selected_labeling_hash": canonical_hash(
-                raw_instance["selected_labeling"]  # type: ignore[arg-type]
-            ),
-        }
-        if any(raw_instance[name] != digest for name, digest in evidence_hashes.items()):
-            raise StageHandlerError("exact instance evidence content hash is inconsistent")
-        if instance.observed_generator_family_hash != context.store.get(
-            reference.artifact_id
-        ).manifest.metadata.get("observed_generator_family_hash"):
-            raise StageHandlerError("exact instance evidence hash metadata is inconsistent")
-        instance_results.append(instance)
-
-    smoke = summarize_oracle_exhaustive_instances(
-        instance_results,
-        seed=context.config.protocol.root_seed,
-        factor_sizes=experiment.oracle_factor_sizes,
-        train_primitives=experiment.train_primitives,
-        heldout_primitives=experiment.heldout_primitives,
-        density=experiment.generator_density,
-        unary_weight=experiment.unary_weight,
-        rho=protocol.rho,
-        delta=protocol.delta,
-        support_policy=protocol.support_policy,
-        random_relabel=protocol.random_relabel,
-        penalties=experiment.support_penalties,
-        max_states=protocol.max_states,
-        generator_rate_shape=protocol.generator_rate_shape,
-        generator_connectivity_policy=protocol.generator_connectivity_policy,
-        generator_normalization=protocol.generator_normalization,
-        exhaustive_tie_atol=protocol.exhaustive_tie_atol,
-        exhaustive_tie_rtol=protocol.exhaustive_tie_rtol,
-    )
-    aggregate: dict[str, JSONLike] = {
-        "evaluated_labelings": smoke.evaluated_labelings,
-        "exact_instances": smoke.exact_instances,
-        "exact_tuple_recovery_fraction": smoke.exact_instances / smoke.instances,
-        "max_best_objective": smoke.max_best_objective,
-        "max_heldout_excess_objective": smoke.max_heldout_excess_objective,
-        "worst_support_error": smoke.worst_support_error,
-        "worst_train_support_error": smoke.worst_train_support_error,
-    }
-    result: dict[str, JSONLike] = {
-        "schema_version": RESULT_SCHEMA_VERSION,
-        **asdict(smoke),
-        "exact_tuple_recovery_fraction": smoke.exact_instances / smoke.instances,
-        "numeric_dtype": "float64",
-        "aggregate": aggregate,
-        "ordered_instance_artifact_ids": list(reducer_ids),
-        "reducer_artifact_id": reduction.reference.artifact_id,
-    }
-    return context.store.put_json(
-        result,
-        filename="exact.json",
-        kind="stage/exp2-exact",
-        metadata=_stage_metadata(
-            context,
-            dependencies,
-            evidence_class="synthetic_oracle_validation",
-            instances=experiment.exact_instances,
-            reducer_artifact_id=reduction.reference.artifact_id,
-        ),
-    )
-
-
-def _synthetic_exact_rule(context: StageContext) -> GateRule:
-    return expected_gate_rule(context.stage_spec, context.config)
-
-
-def handle_gate_synthetic_exact(
-    context: StageContext, dependencies: Mapping[str, ArtifactRef]
-) -> ArtifactRef:
-    try:
-        reference = dependencies["exp2.exact"]
-    except KeyError as error:
-        raise StageHandlerError("gate.synthetic_exact requires exp2.exact") from error
-    observations = _json_object(context, reference, "exact.json")
-    authorization = context.config.gates.overrides.synthetic_exact
-    rule = _synthetic_exact_rule(context)
-    result = _gate_with_optional_override(
-        rule,
-        observations,
-        None if authorization is None else authorization.reason,
-    )
-    return context.store.put_json(
-        result.to_dict(),
-        filename="gate.json",
-        kind="gate/synthetic-exact",
         metadata=_stage_metadata(
             context,
             dependencies,
@@ -2043,8 +1796,6 @@ def default_handlers() -> dict[str, StageHandler]:
         "exp1.probe_banks": handle_exp1_probe_banks,
         "exp1.mechanical": handle_exp1_mechanical,
         "gate.mechanical": handle_gate_mechanical,
-        "exp2.exact": handle_exp2_exact,
-        "gate.synthetic_exact": handle_gate_synthetic_exact,
         "report.build": handle_report_build,
     }
 
@@ -2066,9 +1817,7 @@ __all__ = [
     "handle_exp1_plateau_synthetic",
     "handle_exp1_probe_banks",
     "handle_exp1_synthetic_task",
-    "handle_exp2_exact",
     "handle_gate_mechanical",
-    "handle_gate_synthetic_exact",
     "handle_inputs_tracking2",
     "handle_inputs_tracking2_vgg",
     "handle_report_build",

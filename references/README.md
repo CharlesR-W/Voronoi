@@ -1,12 +1,7 @@
-# Local source archive
+# Activation-geometry source archive
 
-The files under `notes/` are the two mathematical notes used to design the project.
-They are proposals, not empirical sources. Both were read in full before implementation.
-
-| File | SHA-256 |
-|---|---|
-| `notes/approximate-factorization-voronoi-residual.md` | `2a20886c4d1d56ecd89603ad120841ad490c0d5048db715934fbceb076750db8` |
-| `notes/approximate-symmetry-operator-algebra.md` | `09d2e2cf59abf2d4901e10ba4761ccd1da181815a1b35baf75fa02a013948fe8` |
+The two mathematical notes about factor recovery and commutants moved to the standalone
+`../../FactorizedDynamics` project with their hashes and extraction provenance.
 
 The activation-plateau request was traced to several distinct sources rather than one
 published estimand. The source audit and implementation mapping are recorded in

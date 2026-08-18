@@ -26,8 +26,6 @@ TAB_ORDER = (
     ("overview", "Overview"),
     ("formation", "Exp 1A-1C · formation / boundaries"),
     ("snapping", "Exp 1D-1E · snapping / recovery"),
-    ("synthetic", "Later gate · synthetic recovery"),
-    ("real_algebra", "Blocked · conditional algebra"),
     ("spec", "Spec"),
     ("provenance", "Provenance"),
 )
