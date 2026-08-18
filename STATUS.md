@@ -14,8 +14,9 @@ The project scope is now the activation-geometry question alone: functional flat
 candidate sensitivity fissures, assignment and recovery commitment, centroid snapping,
 noise-scale response, and their possible relationship to Fisher flatness and module
 plasticity. The former synthetic factor-recovery, commutant, operator-decomposition,
-and real-algebra program is maintained in the standalone local sibling
-`../FactorizedDynamics` rather than as Experiment 2 here.
+and real-algebra program is maintained in the standalone
+[Factorized Dynamics Lab](https://github.com/CharlesR-W/FactorizedDynamics), with local
+sibling `../FactorizedDynamics`, rather than as Experiment 2 here.
 
 Canonical run: `exp1-cpu-seed0-20260817-v4`
 

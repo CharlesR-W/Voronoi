@@ -122,9 +122,10 @@ cap; later billing reconciliation could still adjust the final amount.
 7. Keep the broader candidate-cell and snapping/recovery work gated.
 
 The former Experiment 2 synthetic factor-recovery, commutant, operator-decomposition,
-and real-algebra work has been split into the standalone local sibling
-`../../FactorizedDynamics`. Do not add those stages back to this repository merely
-because candidate cells could later provide finite states.
+and real-algebra work has been split into the standalone
+[Factorized Dynamics Lab](https://github.com/CharlesR-W/FactorizedDynamics), with local
+sibling `../../FactorizedDynamics`. Do not add those stages back to this repository
+merely because candidate cells could later provide finite states.
 
 ## Verification
 

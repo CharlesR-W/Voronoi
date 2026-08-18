@@ -1,7 +1,8 @@
 # Activation-geometry source archive
 
 The two mathematical notes about factor recovery and commutants moved to the standalone
-`../../FactorizedDynamics` project with their hashes and extraction provenance.
+[Factorized Dynamics Lab](https://github.com/CharlesR-W/FactorizedDynamics), with local
+sibling `../../FactorizedDynamics`, together with their hashes and extraction provenance.
 
 The activation-plateau request was traced to several distinct sources rather than one
 published estimand. The source audit and implementation mapping are recorded in

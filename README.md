@@ -593,9 +593,10 @@ Useful negative outcomes remain distinct:
 
 The former Experiment 2—synthetic factor recovery, commutant spectra, operator
 decomposition, real-transition intertwiners, and multiscale quotients—now lives in the
-standalone local sibling project `../FactorizedDynamics`. Those questions require their
-own synthetic benchmarks, validation ladder, and claim ledger. They are no longer a
-downstream stage or scientific gate for this activation-geometry project.
+standalone [Factorized Dynamics Lab](https://github.com/CharlesR-W/FactorizedDynamics)
+(local sibling `../FactorizedDynamics`). Those questions require their own synthetic
+benchmarks, validation ladder, and claim ledger. They are no longer a downstream stage
+or scientific gate for this activation-geometry project.
 
 ## Dashboard and animation specification
 
