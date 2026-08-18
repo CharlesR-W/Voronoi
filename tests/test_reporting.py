@@ -51,6 +51,18 @@ def test_mock_payload_is_deterministic_and_conspicuously_labeled() -> None:
         assert experiment.status == "MOCKUP"
         assert "MOCKUP" in experiment.title
         assert all("MOCKUP" in plot.title for plot in experiment.plots)
+    assert {plot.key for plot in first.experiments[0].plots} == {
+        "formation_distortion",
+        "formation_nulls",
+        "boundary_alignment",
+        "path_support",
+    }
+    assert {plot.key for plot in first.experiments[1].plots} == {
+        "snapping_damage",
+        "finite_gain",
+        "cell_recovery",
+        "module_comparison",
+    }
 
 
 def test_payload_rejects_unknown_fields_nonfinite_values_and_bad_mock_labels() -> None:
@@ -104,7 +116,7 @@ def test_mock_report_embeds_spec_tabs_and_inline_libraries(tmp_path) -> None:
     output = build_report(tmp_path / "MOCKUP.html", mode="mockup", readme_path="README.md")
     document = output.read_text(encoding="utf-8")
 
-    assert "Voronoi Residual Computation Lab — MOCKUP" in document
+    assert "Voronoi Experiment 1 Dashboard — MOCKUP" in document
     assert "The project deliberately separates claims that are easy to conflate." in document
     assert "Embedded experiment specification" in document
     assert 'id="plotly-bundle"' in document
@@ -117,6 +129,8 @@ def test_mock_report_embeds_spec_tabs_and_inline_libraries(tmp_path) -> None:
     assert "colorscale:'Cividis'" in document
     assert "OKABE_ITO" in document
     assert "MOCKUP — SCHEMATIC, NOT DATA" in document
+    assert "first fitted boundary" in document
+    assert "no contraction (κ = 1)" in document
 
     tab_positions = [document.index(f'"key":"{key}"') for key, _ in TAB_ORDER]
     assert tab_positions == sorted(tab_positions)

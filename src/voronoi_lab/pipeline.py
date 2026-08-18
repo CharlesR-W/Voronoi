@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import json
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -25,6 +27,7 @@ from voronoi_lab.core import (
     GateRule,
     GateStatus,
     JSONLike,
+    SeedDeriver,
     canonical_hash,
     sha256_bytes,
     thaw_json,
@@ -36,6 +39,7 @@ from voronoi_lab.exp1.tracking2 import (
     Tracking2Error,
     parse_tracking2_manifest_bytes,
 )
+from voronoi_lab.exp1.tracking2_vgg import parse_tracking2_vgg_manifest_bytes
 from voronoi_lab.mechanical import replay_synthetic_invariants, replay_toy_geometry
 
 
@@ -54,6 +58,18 @@ _STAGE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _CONFIG_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 _PAYLOAD_SCHEMA_RE = re.compile(r"^[a-z][a-z0-9._-]{0,127}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_PLATEAU_SCHEMA_VERSION = 2
+_RAW_LOCAL_PLANE_JACOBIAN = "local_transition_plane_jacobian"
+_RAW_ANCHOR_PLANE_JACOBIAN = "anchor_transition_plane_jacobian_by_context"
+_RESIDUAL_LOCAL_PLANE_JACOBIAN = "local_residual_update_plane_jacobian"
+_RESIDUAL_ANCHOR_PLANE_JACOBIAN = "anchor_residual_update_plane_jacobian_by_context"
+_RAW_PLANE_ESTIMAND = "2D-plane-restricted ||DT||_F"
+_RESIDUAL_PLANE_ESTIMAND = "2D-plane-restricted ||D(T-I)||_F"
+_PLATEAU_CURVE_ESTIMAND = "center-and-direction median downstream-logit L2 from path base"
+_ARCHITECTURE_COMPARISON_NOTE = (
+    "The rows use different operators and legacy training recipes; this is a "
+    "descriptive, confounded side-by-side view, not a causal architecture ablation."
+)
 
 
 def _validate_payload_path(value: str, *, label: str) -> str:
@@ -809,6 +825,195 @@ def _validate_inputs_artifact(
         raise PipelineError(f"{label} summary does not match its preserved raw evidence")
 
 
+def _validate_vgg_inputs_payload(payload: Mapping[str, object], config: LabConfig | None) -> None:
+    label = "Tracking2 VGG inputs payload"
+    _require_fields(
+        payload,
+        (
+            "architecture",
+            "dataset_isolation",
+            "external_root",
+            "lineage_note",
+            "lineage_quality",
+            "manifest",
+            "observed_repository_revision",
+            "read_only",
+            "training",
+            "training_record",
+            "validated_files",
+        ),
+        label=label,
+    )
+    if payload["read_only"] is not True:
+        raise PipelineError(f"{label} must assert read_only=true")
+    if config is None:
+        raise PipelineError(f"{label} validation requires the signed run configuration")
+    if payload["external_root"] != config.inputs.tracking2_vgg.root.as_posix():
+        raise PipelineError(f"{label} external_root does not match its signed declaration")
+    if payload["lineage_quality"] != "exploratory_legacy":
+        raise PipelineError(f"{label} must remain explicitly exploratory legacy evidence")
+    if not isinstance(payload["lineage_note"], str) or not payload["lineage_note"].strip():
+        raise PipelineError(f"{label} lineage_note must be nonempty")
+    _as_object(payload["architecture"], label=f"{label} architecture")
+    isolation = _as_object(payload["dataset_isolation"], label=f"{label} dataset_isolation")
+    _require_fields(
+        isolation,
+        ("passed", "train_test_distinct_hashes", "train_test_distinct_paths"),
+        label=f"{label} dataset_isolation",
+    )
+    if any(
+        isolation[field] is not True
+        for field in ("passed", "train_test_distinct_hashes", "train_test_distinct_paths")
+    ):
+        raise PipelineError(f"{label} must prove distinct train/test source files by path and hash")
+    _as_object(payload["training"], label=f"{label} training")
+    record = _as_object(payload["training_record"], label=f"{label} training_record")
+    _require_fields(record, ("schema_version", "experiment"), label=f"{label} training_record")
+    manifest = _as_object(payload["manifest"], label=f"{label} manifest")
+    _require_fields(manifest, ("path", "sha256"), label=f"{label} manifest")
+    if manifest["path"] != config.inputs.tracking2_vgg.manifest.as_posix():
+        raise PipelineError(f"{label} manifest path does not match its signed declaration")
+    if not isinstance(manifest["sha256"], str) or not _DIGEST_RE.fullmatch(manifest["sha256"]):
+        raise PipelineError(f"{label} manifest digest is invalid")
+    if manifest["sha256"] != config.inputs.tracking2_vgg.manifest_sha256:
+        raise PipelineError(f"{label} manifest digest does not match its signed declaration")
+    validated = _as_object(payload["validated_files"], label=f"{label} validated_files")
+    if not validated:
+        raise PipelineError(f"{label} validated_files cannot be empty")
+    for name, raw in validated.items():
+        entry = _as_object(raw, label=f"{label} validated_files[{name!r}]")
+        _require_fields(
+            entry,
+            ("declared_path", "sha256", "size_bytes"),
+            label=f"{label} validated_files[{name!r}]",
+        )
+        if not isinstance(entry["sha256"], str) or not _DIGEST_RE.fullmatch(entry["sha256"]):
+            raise PipelineError(f"{label} validated file {name!r} has an invalid digest")
+        _as_int(entry["size_bytes"], label=f"{label} validated file size", minimum=1)
+
+
+def _validate_vgg_inputs_artifact(
+    payload: Mapping[str, object],
+    reference: ArtifactRef,
+    store: ArtifactStore,
+    config: LabConfig | None,
+) -> None:
+    label = "Tracking2 VGG inputs artifact"
+    _validate_vgg_inputs_payload(payload, config)
+    if config is None:
+        raise PipelineError(f"{label} validation requires the signed run configuration")
+    files = {entry.path: entry for entry in reference.manifest.files}
+    expected_paths = {"inputs.json", "manifest.yaml", "criticality.json"}
+    if set(files) != expected_paths:
+        raise PipelineError(f"{label} must preserve its exact manifest and criticality bytes")
+    expected_media = {
+        "inputs.json": "application/json",
+        "manifest.yaml": "application/yaml",
+        "criticality.json": "application/json",
+    }
+    if any(files[path].media_type != media for path, media in expected_media.items()):
+        raise PipelineError(f"{label} payload media types are invalid")
+    manifest_bytes = store.read_bytes(reference.artifact_id, "manifest.yaml")
+    if sha256_bytes(manifest_bytes) != config.inputs.tracking2_vgg.manifest_sha256:
+        raise PipelineError(f"{label} manifest bytes do not match the signed digest")
+    try:
+        manifest = parse_tracking2_vgg_manifest_bytes(manifest_bytes)
+    except Tracking2Error as error:
+        raise PipelineError(f"{label} embedded manifest is invalid") from error
+    architecture = manifest.architecture
+    expected_model = (
+        f"vgg19_bn_classifier{architecture.classifier_width}_width{architecture.width_multiplier:g}"
+    )
+    if config.inputs.tracking2_vgg.expected_model != expected_model:
+        raise PipelineError(f"{label} architecture does not match the signed model")
+    if manifest.lineage_quality != "exploratory_legacy":
+        raise PipelineError(f"{label} lineage must remain explicitly exploratory")
+    if tuple(config.experiment1.checkpoints) != tuple(
+        checkpoint.epoch for checkpoint in manifest.checkpoints
+    ):
+        raise PipelineError(f"{label} checkpoint axis does not match the signed configuration")
+    banks = config.experiment1.probe_banks
+    if banks.fit_train_images + banks.independent_fit_train_images > manifest.training.train_size:
+        raise PipelineError(f"{label} training banks exceed the embedded training split")
+    required_test = (
+        max(banks.geometry_test_images, banks.intervention_test_images)
+        if banks.intervention_nested_in_geometry
+        else banks.geometry_test_images + banks.intervention_test_images
+    )
+    if required_test > manifest.training.test_size:
+        raise PipelineError(f"{label} held-out banks exceed the embedded test split")
+    references = {
+        "model_source": manifest.architecture.source,
+        **{
+            f"checkpoint_epoch{checkpoint.epoch}": checkpoint for checkpoint in manifest.checkpoints
+        },
+        "dataset_train": manifest.datasets.train,
+        "dataset_test": manifest.datasets.test,
+        "training_record": manifest.training_record.file,
+    }
+    expected_validated_files: dict[str, JSONLike] = {
+        name: {
+            "declared_path": item.path.as_posix(),
+            "sha256": item.sha256,
+            "size_bytes": item.size_bytes,
+        }
+        for name, item in sorted(references.items())
+    }
+    criticality_bytes = store.read_bytes(reference.artifact_id, "criticality.json")
+    criticality_reference = manifest.training_record.file
+    if (
+        len(criticality_bytes) != criticality_reference.size_bytes
+        or sha256_bytes(criticality_bytes) != criticality_reference.sha256
+    ):
+        raise PipelineError(f"{label} criticality bytes do not match the embedded manifest")
+    try:
+        criticality = json.loads(criticality_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PipelineError(f"{label} embedded criticality metadata is invalid JSON") from error
+    if not isinstance(criticality, dict):
+        raise PipelineError(f"{label} embedded criticality metadata must be an object")
+    if criticality.get("schema_version") != manifest.training_record.schema_version:
+        raise PipelineError(f"{label} criticality schema does not match the manifest")
+    if criticality.get("experiment") != manifest.training_record.experiment:
+        raise PipelineError(f"{label} criticality experiment does not match the manifest")
+    expected_payload: dict[str, JSONLike] = {
+        "schema_version": 1,
+        "architecture": manifest.architecture.model_dump(mode="json"),
+        "dataset_isolation": {
+            "passed": True,
+            "train_test_distinct_hashes": (
+                manifest.datasets.train.sha256 != manifest.datasets.test.sha256
+            ),
+            "train_test_distinct_paths": (
+                manifest.datasets.train.path != manifest.datasets.test.path
+            ),
+        },
+        "external_root": config.inputs.tracking2_vgg.root.as_posix(),
+        "lineage_note": manifest.lineage_note,
+        "lineage_quality": "exploratory_legacy",
+        "manifest": {
+            "path": config.inputs.tracking2_vgg.manifest.as_posix(),
+            "sha256": config.inputs.tracking2_vgg.manifest_sha256,
+        },
+        "observed_repository_revision": manifest.observed_repository_revision,
+        "read_only": True,
+        "training": manifest.training.model_dump(mode="json"),
+        "training_record": criticality,
+        "validated_files": expected_validated_files,
+    }
+    if canonical_hash(payload) != canonical_hash(expected_payload):
+        raise PipelineError(f"{label} summary does not match its preserved raw evidence")
+    expected_metadata = {
+        "criticality_experiment": manifest.training_record.experiment,
+        "input_count": len(references),
+        "lineage_quality": "exploratory_legacy",
+    }
+    if any(
+        reference.manifest.metadata.get(key) != value for key, value in expected_metadata.items()
+    ):
+        raise PipelineError(f"{label} provenance metadata is inconsistent")
+
+
 def _validate_probe_plan_payload(payload: Mapping[str, object], declared_paths: set[str]) -> None:
     label = "probe-bank plan"
     _require_fields(
@@ -1398,6 +1603,1423 @@ def _validate_mock_report_payload(
         )
 
 
+def _artifact_file_map(reference: ArtifactRef) -> dict[str, object]:
+    return {entry.path: entry for entry in reference.manifest.files}
+
+
+def _validate_inventory_file_record(
+    raw: object,
+    *,
+    label: str,
+    expected_path: str,
+    declared_files: Mapping[str, object],
+) -> None:
+    record = _as_object(raw, label=label)
+    _require_fields(record, ("path", "size_bytes", "sha256"), label=label)
+    if record["path"] != expected_path:
+        raise PipelineError(f"{label} path does not match its semantic location")
+    size = _as_int(record["size_bytes"], label=f"{label} size", minimum=1)
+    digest = record["sha256"]
+    if not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest):
+        raise PipelineError(f"{label} digest is invalid")
+    entry = declared_files.get(expected_path)
+    if (
+        entry is None
+        or getattr(entry, "size", None) != size
+        or getattr(entry, "sha256", None) != digest
+    ):
+        raise PipelineError(f"{label} disagrees with the immutable artifact manifest")
+
+
+def _validate_numeric_npz(
+    raw: bytes,
+    *,
+    label: str,
+    expected_inventory: Mapping[str, object] | None = None,
+) -> None:
+    try:
+        with np.load(io.BytesIO(raw), allow_pickle=False) as archive:
+            if not archive.files:
+                raise PipelineError(f"{label} cannot be empty")
+            if expected_inventory is not None and set(archive.files) != set(expected_inventory):
+                raise PipelineError(f"{label} array set differs from metadata")
+            for name in archive.files:
+                value = archive[name]
+                if value.dtype.hasobject or value.size == 0:
+                    raise PipelineError(f"{label} array {name!r} is empty or object-valued")
+                if np.issubdtype(value.dtype, np.number) and not np.all(np.isfinite(value)):
+                    raise PipelineError(f"{label} array {name!r} is non-finite")
+                if expected_inventory is not None:
+                    row = _as_object(expected_inventory[name], label=f"{label} inventory {name!r}")
+                    _require_fields(row, ("dtype", "shape"), label=f"{label} inventory")
+                    if row["dtype"] != str(value.dtype) or list(value.shape) != list(
+                        _as_array(row["shape"], label=f"{label} shape")
+                    ):
+                        raise PipelineError(f"{label} array {name!r} differs from metadata")
+    except PipelineError:
+        raise
+    except (OSError, ValueError, EOFError) as error:
+        raise PipelineError(f"{label} is not a valid pickle-free NPZ payload") from error
+
+
+def _validate_synthetic_plateau_task_artifact(
+    inventory: Mapping[str, object],
+    reference: ArtifactRef,
+    store: ArtifactStore,
+    config: LabConfig | None,
+) -> None:
+    label = "synthetic plateau task artifact"
+    if config is None:
+        raise PipelineError(f"{label} validation requires the signed configuration")
+    _require_fields(
+        inventory,
+        (
+            "schema_version",
+            "task",
+            "architecture",
+            "dataset_config",
+            "model_config",
+            "training_config",
+            "state_schema",
+            "dataset_file",
+            "metrics_file",
+            "checkpoints",
+        ),
+        label=label,
+    )
+    if (
+        inventory["task"] != "three_class_2d_gaussian_mixture"
+        or inventory["architecture"] != "normalization_free_residual_mlp"
+    ):
+        raise PipelineError(f"{label} declares an unsupported task or architecture")
+    declared = _artifact_file_map(reference)
+    _validate_inventory_file_record(
+        inventory["dataset_file"],
+        label=f"{label} dataset_file",
+        expected_path="dataset.npz",
+        declared_files=declared,
+    )
+    _validate_inventory_file_record(
+        inventory["metrics_file"],
+        label=f"{label} metrics_file",
+        expected_path="training_progress.npz",
+        declared_files=declared,
+    )
+    checkpoints = _as_array(inventory["checkpoints"], label=f"{label} checkpoints")
+    epochs = tuple(config.experiment1.checkpoints)
+    if len(checkpoints) != len(epochs):
+        raise PipelineError(f"{label} checkpoint count differs from config")
+    expected_paths = {"inventory.json", "dataset.npz", "training_progress.npz"}
+    for expected_epoch, raw_row in zip(epochs, checkpoints, strict=True):
+        row = _as_object(raw_row, label=f"{label} checkpoint")
+        _require_fields(
+            row,
+            ("epoch", "file", "train_accuracy", "test_accuracy"),
+            label=f"{label} checkpoint",
+        )
+        if row["epoch"] != expected_epoch:
+            raise PipelineError(f"{label} checkpoint axis differs from config")
+        path = f"checkpoints/epoch_{expected_epoch:05d}.npz"
+        _validate_inventory_file_record(
+            row["file"],
+            label=f"{label} checkpoint {expected_epoch}",
+            expected_path=path,
+            declared_files=declared,
+        )
+        expected_paths.add(path)
+        _validate_numeric_npz(
+            store.read_bytes(reference.artifact_id, path),
+            label=f"{label} checkpoint {expected_epoch}",
+        )
+    if set(declared) != expected_paths:
+        raise PipelineError(f"{label} file set differs from its inventory")
+    declared_task = config.experiment1.synthetic_plateau_task
+    dataset_config = _as_object(inventory["dataset_config"], label=f"{label} dataset config")
+    model_config = _as_object(inventory["model_config"], label=f"{label} model config")
+    training_config = _as_object(inventory["training_config"], label=f"{label} training config")
+    expected_dataset = {
+        "seed": SeedDeriver(config.protocol.root_seed, ("exp1", "synthetic_task", "v1")).derive(
+            "dataset", bits=32
+        ),
+        "train_samples_per_class": declared_task.train_samples_per_class,
+        "test_samples_per_class": declared_task.test_samples_per_class,
+        "radius": declared_task.class_radius,
+        "standard_deviation": declared_task.noise_standard_deviation,
+    }
+    expected_model = {
+        "input_dim": declared_task.input_dimensions,
+        "width": declared_task.hidden_width,
+        "blocks": declared_task.residual_blocks,
+        "classes": declared_task.classes,
+    }
+    expected_training = {
+        "seed": SeedDeriver(config.protocol.root_seed, ("exp1", "synthetic_task", "v1")).derive(
+            "training", bits=32
+        ),
+        "epochs": declared_task.epochs,
+        "checkpoint_epochs": list(epochs),
+        "batch_size": declared_task.batch_size,
+        "learning_rate": declared_task.learning_rate,
+        "momentum": declared_task.momentum,
+        "weight_decay": declared_task.weight_decay,
+    }
+    if any(
+        canonical_hash(observed) != canonical_hash(expected)
+        for observed, expected in (
+            (dataset_config, expected_dataset),
+            (model_config, expected_model),
+            (training_config, expected_training),
+        )
+    ):
+        raise PipelineError(f"{label} configuration differs from the signed protocol")
+    _validate_numeric_npz(
+        store.read_bytes(reference.artifact_id, "dataset.npz"), label=f"{label} dataset"
+    )
+    _validate_numeric_npz(
+        store.read_bytes(reference.artifact_id, "training_progress.npz"),
+        label=f"{label} training progress",
+    )
+
+
+def _validate_plateau_checkpoint_plane_contract(
+    raw_arrays: bytes,
+    metadata: Mapping[str, object],
+    *,
+    residual_identity: bool,
+    label: str,
+) -> None:
+    """Validate the v2 raw/adjusted plane fields and their display selection."""
+
+    expected_display = {
+        "local_array": (
+            _RESIDUAL_LOCAL_PLANE_JACOBIAN if residual_identity else _RAW_LOCAL_PLANE_JACOBIAN
+        ),
+        "anchor_array": (
+            _RESIDUAL_ANCHOR_PLANE_JACOBIAN if residual_identity else _RAW_ANCHOR_PLANE_JACOBIAN
+        ),
+        "estimand": _RESIDUAL_PLANE_ESTIMAND if residual_identity else _RAW_PLANE_ESTIMAND,
+        "selection": (
+            "residual_update_for_residual_transition"
+            if residual_identity
+            else "raw_transition_for_nonresidual_transition"
+        ),
+    }
+    if metadata.get("residual_identity") is not residual_identity:
+        raise PipelineError(f"{label} residual-identity declaration is inconsistent")
+    display = _as_object(metadata.get("plane_jacobian_display"), label=f"{label} display")
+    if canonical_hash(display) != canonical_hash(expected_display):
+        raise PipelineError(f"{label} plane Jacobian display selection is inconsistent")
+
+    try:
+        with np.load(io.BytesIO(raw_arrays), allow_pickle=False) as archive:
+            names = set(archive.files)
+            common_required = {
+                _RAW_LOCAL_PLANE_JACOBIAN,
+                _RAW_ANCHOR_PLANE_JACOBIAN,
+                "local_axis",
+                "local_transition_sites",
+                "anchor_axis",
+                "anchor_transition_sites_by_context",
+                "anchor_vectors",
+            }
+            if not common_required.issubset(names):
+                raise PipelineError(f"{label} cannot replay both raw transition plane fields")
+            local_raw = np.asarray(archive[_RAW_LOCAL_PLANE_JACOBIAN]).copy()
+            anchor_raw = np.asarray(archive[_RAW_ANCHOR_PLANE_JACOBIAN]).copy()
+            local_axis = np.asarray(archive["local_axis"]).copy()
+            local_transition = np.asarray(archive["local_transition_sites"]).copy()
+            anchor_axis = np.asarray(archive["anchor_axis"]).copy()
+            anchor_transition = np.asarray(archive["anchor_transition_sites_by_context"]).copy()
+            anchor_vectors = np.asarray(archive["anchor_vectors"]).copy()
+            if (
+                local_raw.ndim != 4
+                or local_raw.shape[0] != 2
+                or anchor_raw.ndim != 3
+                or anchor_raw.shape[0] != 3
+            ):
+                raise PipelineError(f"{label} raw plane Jacobian fields have invalid shapes")
+            residual_names = {
+                _RESIDUAL_LOCAL_PLANE_JACOBIAN,
+                _RESIDUAL_ANCHOR_PLANE_JACOBIAN,
+            }
+            if not residual_identity:
+                if names & residual_names:
+                    raise PipelineError(
+                        f"{label} non-residual transition must not declare residual-update fields"
+                    )
+                local_adjusted = None
+                anchor_adjusted = None
+                local_grid = None
+                anchor_grid = None
+            else:
+                residual_required = {
+                    *residual_names,
+                    "local_grid_vectors",
+                    "anchor_grid_vectors",
+                }
+                if not residual_required.issubset(names):
+                    raise PipelineError(
+                        f"{label} residual transition is missing replayable adjusted fields"
+                    )
+                local_adjusted = np.asarray(archive[_RESIDUAL_LOCAL_PLANE_JACOBIAN]).copy()
+                anchor_adjusted = np.asarray(archive[_RESIDUAL_ANCHOR_PLANE_JACOBIAN]).copy()
+                local_grid = np.asarray(archive["local_grid_vectors"]).copy()
+                anchor_grid = np.asarray(archive["anchor_grid_vectors"]).copy()
+                if (
+                    local_adjusted.shape != local_raw.shape
+                    or anchor_adjusted.shape != anchor_raw.shape
+                ):
+                    raise PipelineError(
+                        f"{label} raw and residual-adjusted plane fields must align"
+                    )
+    except PipelineError:
+        raise
+    except (OSError, ValueError, EOFError, TypeError) as error:
+        raise PipelineError(f"{label} arrays are not a valid pickle-free NPZ") from error
+
+    from voronoi_lab.exp1.surface_geometry import (
+        ThreeAnchorSlice,
+        plane_pullback_jacobian_frobenius,
+    )
+
+    robust_scale = metadata.get("robust_activation_scale")
+    if isinstance(robust_scale, bool) or not isinstance(robust_scale, (int, float)):
+        raise PipelineError(f"{label} robust activation scale is invalid")
+    try:
+        expected_local_raw = np.empty_like(local_raw)
+        for kind in range(local_raw.shape[0]):
+            for center in range(local_raw.shape[1]):
+                expected_local_raw[kind, center] = plane_pullback_jacobian_frobenius(
+                    local_transition[kind, center],
+                    local_axis,
+                    local_axis,
+                    first_scale=float(robust_scale),
+                    second_scale=float(robust_scale),
+                )
+        anchor_plane = ThreeAnchorSlice.from_anchors(*anchor_vectors)
+        expected_anchor_raw = np.empty_like(anchor_raw)
+        for context in range(anchor_raw.shape[0]):
+            expected_anchor_raw[context] = plane_pullback_jacobian_frobenius(
+                anchor_transition[:, :, context],
+                anchor_axis,
+                anchor_axis,
+                first_scale=anchor_plane.alpha_scale,
+                second_scale=anchor_plane.beta_scale,
+            )
+    except (TypeError, ValueError) as error:
+        raise PipelineError(f"{label} raw transition plane replay failed") from error
+    if not np.allclose(local_raw, expected_local_raw, rtol=1e-5, atol=2e-6):
+        raise PipelineError(f"{label} local raw transition plane field does not replay")
+    if not np.allclose(anchor_raw, expected_anchor_raw, rtol=1e-5, atol=2e-6):
+        raise PipelineError(f"{label} anchor raw transition plane field does not replay")
+    if not residual_identity:
+        return
+
+    assert local_adjusted is not None
+    assert anchor_adjusted is not None
+    assert local_grid is not None
+    assert anchor_grid is not None
+    expected_local_adjusted = np.empty_like(local_adjusted)
+    for kind in range(local_adjusted.shape[0]):
+        for center in range(local_adjusted.shape[1]):
+            expected_local_adjusted[kind, center] = plane_pullback_jacobian_frobenius(
+                local_transition[kind, center] - local_grid[kind, center],
+                local_axis,
+                local_axis,
+                first_scale=float(robust_scale),
+                second_scale=float(robust_scale),
+            )
+    try:
+        expected_anchor_adjusted = np.empty_like(anchor_adjusted)
+        for context in range(anchor_adjusted.shape[0]):
+            expected_anchor_adjusted[context] = plane_pullback_jacobian_frobenius(
+                anchor_transition[:, :, context] - anchor_grid,
+                anchor_axis,
+                anchor_axis,
+                first_scale=anchor_plane.alpha_scale,
+                second_scale=anchor_plane.beta_scale,
+            )
+    except (TypeError, ValueError) as error:
+        raise PipelineError(f"{label} residual-adjusted plane replay failed") from error
+    if not np.allclose(local_adjusted, expected_local_adjusted, rtol=1e-5, atol=2e-6):
+        raise PipelineError(f"{label} local residual-adjusted plane field does not replay")
+    if not np.allclose(
+        anchor_adjusted,
+        expected_anchor_adjusted,
+        rtol=1e-5,
+        atol=2e-6,
+    ):
+        raise PipelineError(f"{label} anchor residual-adjusted plane field does not replay")
+
+
+def _validate_plateau_collection_artifact(
+    summary: Mapping[str, object],
+    reference: ArtifactRef,
+    store: ArtifactStore,
+    config: LabConfig | None,
+) -> None:
+    label = "plateau collection artifact"
+    if config is None:
+        raise PipelineError(f"{label} validation requires the signed configuration")
+    _require_fields(
+        summary,
+        (
+            "task",
+            "architecture",
+            "checkpoint_rows",
+            "checkpoint_epochs",
+            "source_separation",
+            "task_artifact_id",
+            "jacobian_display_contract",
+        ),
+        label=label,
+    )
+    if summary["checkpoint_epochs"] != list(config.experiment1.checkpoints):
+        raise PipelineError(f"{label} checkpoint axis differs from config")
+    expected_display = {
+        "protocol_version": config.experiment1.plateau_protocol.protocol_version,
+        "local_source_array": _RESIDUAL_LOCAL_PLANE_JACOBIAN,
+        "anchor_source_array": _RESIDUAL_ANCHOR_PLANE_JACOBIAN,
+        "estimand": _RESIDUAL_PLANE_ESTIMAND,
+    }
+    if canonical_hash(summary["jacobian_display_contract"]) != canonical_hash(expected_display):
+        raise PipelineError(f"{label} Jacobian display contract differs from protocol v2")
+    rows = _as_array(summary["checkpoint_rows"], label=f"{label} checkpoint rows")
+    if len(rows) != len(config.experiment1.checkpoints):
+        raise PipelineError(f"{label} checkpoint row count differs from config")
+    declared = _artifact_file_map(reference)
+    expected_paths = {"summary.json"}
+    for epoch, raw_row in zip(config.experiment1.checkpoints, rows, strict=True):
+        row = _as_object(raw_row, label=f"{label} checkpoint row")
+        _require_fields(row, ("epoch", "arrays", "metadata", "inventory"), label=label)
+        prefix = f"checkpoints/epoch_{epoch:05d}"
+        expected = {
+            "epoch": epoch,
+            "arrays": f"{prefix}/arrays.npz",
+            "metadata": f"{prefix}/metadata.json",
+            "inventory": f"{prefix}/inventory.json",
+        }
+        if canonical_hash(row) != canonical_hash(expected):
+            raise PipelineError(f"{label} checkpoint row has inconsistent paths")
+        expected_paths.update((expected["arrays"], expected["metadata"], expected["inventory"]))
+        metadata = store.read_json(reference.artifact_id, expected["metadata"])
+        inventory = store.read_json(reference.artifact_id, expected["inventory"])
+        if not isinstance(metadata, Mapping) or not isinstance(inventory, Mapping):
+            raise PipelineError(f"{label} child metadata/inventory must be objects")
+        if (
+            metadata.get("schema_version") != _PLATEAU_SCHEMA_VERSION
+            or metadata.get("epoch") != epoch
+        ):
+            raise PipelineError(f"{label} child metadata has an invalid epoch or schema")
+        array_inventory = _as_object(
+            metadata.get("array_inventory"), label=f"{label} array inventory"
+        )
+        raw_arrays = store.read_bytes(reference.artifact_id, expected["arrays"])
+        raw_metadata = store.read_bytes(reference.artifact_id, expected["metadata"])
+        inventory_files = _as_object(inventory.get("files"), label=f"{label} byte inventory")
+        for name, data in (("arrays.npz", raw_arrays), ("metadata.json", raw_metadata)):
+            item = _as_object(inventory_files.get(name), label=f"{label} {name}")
+            _require_fields(item, ("sha256", "size_bytes"), label=f"{label} {name}")
+            if item["sha256"] != sha256_bytes(data) or item["size_bytes"] != len(data):
+                raise PipelineError(f"{label} {name} byte inventory is inconsistent")
+        _validate_numeric_npz(
+            raw_arrays,
+            label=f"{label} epoch {epoch} arrays",
+            expected_inventory=array_inventory,
+        )
+        _validate_plateau_checkpoint_plane_contract(
+            raw_arrays,
+            metadata,
+            residual_identity=True,
+            label=f"{label} epoch {epoch}",
+        )
+    if set(declared) != expected_paths:
+        raise PipelineError(f"{label} file set differs from checkpoint rows")
+    upstreams = reference.manifest.metadata.get("upstream_artifacts")
+    if not isinstance(upstreams, Mapping) or summary["task_artifact_id"] != upstreams.get(
+        "exp1.synthetic_task"
+    ):
+        raise PipelineError(f"{label} is not bound to its synthetic task artifact")
+
+
+def _validate_plateau_checkpoint_child(
+    child: ArtifactRef,
+    store: ArtifactStore,
+    *,
+    architecture: str,
+    epoch: int,
+) -> None:
+    label = f"CIFAR plateau {architecture} epoch {epoch} shard"
+    if child.manifest.kind != "shard/exp1-plateau-cifar-checkpoint":
+        raise PipelineError(f"{label} has the wrong artifact kind")
+    files = {entry.path: entry for entry in child.manifest.files}
+    if set(files) != {"arrays.npz", "metadata.json", "inventory.json"}:
+        raise PipelineError(f"{label} must contain arrays, metadata, and byte inventory")
+    if files["arrays.npz"].media_type != "application/x-npz" or any(
+        files[name].media_type != "application/json" for name in ("metadata.json", "inventory.json")
+    ):
+        raise PipelineError(f"{label} has invalid payload media types")
+    metadata = store.read_json(child.artifact_id, "metadata.json")
+    inventory = store.read_json(child.artifact_id, "inventory.json")
+    if not isinstance(metadata, Mapping) or not isinstance(inventory, Mapping):
+        raise PipelineError(f"{label} metadata and inventory must be objects")
+    expected_architecture = {
+        "resnet": "tracking2_resnet18_v2_width64",
+        "vgg": "tracking2_vgg19_bn_width1_classifier512",
+    }[architecture]
+    if (
+        metadata.get("schema_version") != _PLATEAU_SCHEMA_VERSION
+        or metadata.get("epoch") != epoch
+        or metadata.get("architecture") != expected_architecture
+    ):
+        raise PipelineError(f"{label} metadata identity is inconsistent")
+    if (
+        child.manifest.metadata.get("architecture") != architecture
+        or child.manifest.metadata.get("epoch") != epoch
+        or child.manifest.metadata.get("result_schema_version") != _PLATEAU_SCHEMA_VERSION
+    ):
+        raise PipelineError(f"{label} immutable shard coordinates are inconsistent")
+    arrays = store.read_bytes(child.artifact_id, "arrays.npz")
+    metadata_bytes = store.read_bytes(child.artifact_id, "metadata.json")
+    inventory_files = _as_object(inventory.get("files"), label=f"{label} byte inventory")
+    for name, data in (("arrays.npz", arrays), ("metadata.json", metadata_bytes)):
+        row = _as_object(inventory_files.get(name), label=f"{label} {name}")
+        _require_fields(row, ("sha256", "size_bytes"), label=f"{label} {name}")
+        if row["sha256"] != sha256_bytes(data) or row["size_bytes"] != len(data):
+            raise PipelineError(f"{label} {name} byte inventory is inconsistent")
+    array_inventory = _as_object(metadata.get("array_inventory"), label=f"{label} array inventory")
+    _validate_numeric_npz(
+        arrays,
+        label=f"{label} arrays",
+        expected_inventory=array_inventory,
+    )
+    _validate_plateau_checkpoint_plane_contract(
+        arrays,
+        metadata,
+        residual_identity=architecture == "resnet",
+        label=label,
+    )
+
+
+def _validate_plateau_cifar_artifact(
+    summary: Mapping[str, object],
+    reference: ArtifactRef,
+    store: ArtifactStore,
+    config: LabConfig | None,
+) -> None:
+    label = "CIFAR plateau collection artifact"
+    if config is None:
+        raise PipelineError(f"{label} validation requires the signed configuration")
+    _require_fields(
+        summary,
+        (
+            "task",
+            "architectures",
+            "checkpoint_epochs",
+            "checkpoint_rows",
+            "reducer_artifact_id",
+            "train_bank",
+            "test_bank",
+            "lineage_scope",
+            "confounds",
+            "source_separation",
+            "jacobian_display_contract",
+        ),
+        label=label,
+    )
+    if summary["task"] != "cifar10" or summary["architectures"] != ["resnet", "vgg"]:
+        raise PipelineError(f"{label} task or architecture axis is invalid")
+    if summary["checkpoint_epochs"] != list(config.experiment1.checkpoints):
+        raise PipelineError(f"{label} checkpoint axis differs from config")
+    expected_display = {
+        "protocol_version": config.experiment1.plateau_protocol.protocol_version,
+        "resnet": {
+            "local_source_array": _RESIDUAL_LOCAL_PLANE_JACOBIAN,
+            "anchor_source_array": _RESIDUAL_ANCHOR_PLANE_JACOBIAN,
+            "estimand": _RESIDUAL_PLANE_ESTIMAND,
+        },
+        "vgg": {
+            "local_source_array": _RAW_LOCAL_PLANE_JACOBIAN,
+            "anchor_source_array": _RAW_ANCHOR_PLANE_JACOBIAN,
+            "estimand": _RAW_PLANE_ESTIMAND,
+        },
+        "comparison_scope": "descriptive_confounded_side_by_side_with_row_specific_operators",
+    }
+    if canonical_hash(summary["jacobian_display_contract"]) != canonical_hash(expected_display):
+        raise PipelineError(f"{label} Jacobian display contract differs from protocol v2")
+    if set(_artifact_file_map(reference)) != {"summary.json"}:
+        raise PipelineError(f"{label} parent must contain only its reducer summary")
+    rows = _as_array(summary["checkpoint_rows"], label=f"{label} checkpoint rows")
+    expected_coordinates = tuple(
+        (architecture, epoch)
+        for architecture in ("resnet", "vgg")
+        for epoch in config.experiment1.checkpoints
+    )
+    if len(rows) != len(expected_coordinates):
+        raise PipelineError(f"{label} checkpoint row count differs from config")
+    child_ids: list[str] = []
+    for (architecture, epoch), raw_row in zip(expected_coordinates, rows, strict=True):
+        row = _as_object(raw_row, label=f"{label} checkpoint row")
+        _require_fields(
+            row,
+            ("architecture", "epoch", "artifact_id", "arrays", "metadata", "inventory"),
+            label=f"{label} checkpoint row",
+        )
+        if (
+            row["architecture"] != architecture
+            or row["epoch"] != epoch
+            or row["arrays"] != "arrays.npz"
+            or row["metadata"] != "metadata.json"
+            or row["inventory"] != "inventory.json"
+        ):
+            raise PipelineError(f"{label} checkpoint row coordinates are inconsistent")
+        artifact_id = row["artifact_id"]
+        if not isinstance(artifact_id, str) or not _DIGEST_RE.fullmatch(artifact_id):
+            raise PipelineError(f"{label} checkpoint artifact id is invalid")
+        child = store.get(artifact_id, verify=True)
+        _validate_plateau_checkpoint_child(
+            child,
+            store,
+            architecture=architecture,
+            epoch=epoch,
+        )
+        child_ids.append(artifact_id)
+    if len(set(child_ids)) != len(child_ids):
+        raise PipelineError(f"{label} checkpoint artifacts must be unique")
+    reducer_id = summary["reducer_artifact_id"]
+    if not isinstance(reducer_id, str) or not _DIGEST_RE.fullmatch(reducer_id):
+        raise PipelineError(f"{label} reducer artifact id is invalid")
+    reducer = store.get(reducer_id, verify=True)
+    if reducer.manifest.kind != "shards/reducer-manifest":
+        raise PipelineError(f"{label} reducer artifact has the wrong kind")
+    for bank_name, split in (("train_bank", "train"), ("test_bank", "test")):
+        bank = _as_object(summary[bank_name], label=f"{label} {bank_name}")
+        required = ["bank_id", "image_ids", "tensor_sha256", "source_sha256", "recipe"]
+        if split == "test":
+            required.append("labels")
+        _require_fields(bank, required, label=f"{label} {bank_name}")
+        for digest_name in ("bank_id", "tensor_sha256", "source_sha256"):
+            digest = bank[digest_name]
+            if not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest):
+                raise PipelineError(f"{label} {bank_name} {digest_name} is invalid")
+        image_ids = _as_array(bank["image_ids"], label=f"{label} {bank_name} image ids")
+        if not image_ids or len(set(image_ids)) != len(image_ids):
+            raise PipelineError(f"{label} {bank_name} image ids must be nonempty and unique")
+        if split == "test" and len(_as_array(bank["labels"], label=f"{label} test labels")) != len(
+            image_ids
+        ):
+            raise PipelineError(f"{label} test labels must align with image ids")
+    confounds = _as_array(summary["confounds"], label=f"{label} confounds")
+    if not confounds or any(not isinstance(item, str) or not item for item in confounds):
+        raise PipelineError(f"{label} must preserve its exploratory comparison caveats")
+
+
+def _animation_npz_member(
+    store: ArtifactStore,
+    artifact_id: str,
+    path: str,
+    member: str,
+    *,
+    label: str,
+) -> np.ndarray:
+    """Read one finite numeric animation source without enabling pickle."""
+
+    try:
+        raw = store.read_bytes(artifact_id, path)
+        with np.load(io.BytesIO(raw), allow_pickle=False) as archive:
+            if member not in archive.files:
+                raise PipelineError(f"{label} is missing NPZ member {member!r}")
+            array = np.asarray(archive[member]).copy()
+    except PipelineError:
+        raise
+    except (OSError, ValueError, EOFError, TypeError) as error:
+        raise PipelineError(f"{label} is not a valid pickle-free NPZ") from error
+    if array.dtype.kind not in "biuf" or array.size == 0 or not np.all(np.isfinite(array)):
+        raise PipelineError(f"{label} member {member!r} must be finite and numeric")
+    return array
+
+
+def _expected_computed_scale_metadata(
+    data_range: tuple[float, float],
+    *,
+    padded: bool = False,
+    include_zero: bool = False,
+) -> dict[str, float | str | bool]:
+    """Replay the renderer's no-override global scale contract exactly."""
+
+    data_min, data_max = data_range
+    if padded:
+        scale_min = min(data_min, 0.0) if include_zero else data_min
+        scale_max = max(data_max, 0.0) if include_zero else data_max
+        span = scale_max - scale_min
+        if span <= 0.0:
+            span = max(abs(scale_min), 1.0)
+        padding = 0.05 * span
+        display_min = scale_min - padding
+        display_max = scale_max + padding
+        source = "computed_global_with_padding"
+    elif data_min < data_max:
+        display_min, display_max = data_min, data_max
+        source = "computed_global"
+    else:
+        padding = max(abs(data_min) * 0.05, 1.0)
+        display_min, display_max = data_min - padding, data_max + padding
+        source = "computed_global_constant_padding"
+    return {
+        "display_min": display_min,
+        "display_max": display_max,
+        "data_min": data_min,
+        "data_max": data_max,
+        "source": source,
+        "clips_data": display_min > data_min or display_max < data_max,
+    }
+
+
+def _validate_animation_image_bundle(
+    reference: ArtifactRef,
+    store: ArtifactStore,
+    row: Mapping[str, object],
+    *,
+    checkpoints: tuple[int, ...],
+    expected_name: str,
+    expected_kind: str,
+    expected_task: str,
+    expected_architectures: tuple[str, ...],
+    timing: tuple[int, int, int],
+    expected_bundle_contract: Mapping[str, object],
+    expected_scalar_range: tuple[float, float],
+    expected_x_coordinates: np.ndarray,
+    expected_y_coordinates: np.ndarray,
+    expected_curve_x_range: tuple[float, float] | None = None,
+    expected_curve_y_range: tuple[float, float] | None = None,
+    architecture_maxima: tuple[np.ndarray, np.ndarray] | None = None,
+) -> None:
+    """Validate image bytes, decoded timing, and fixed-scale renderer metadata."""
+
+    from PIL import Image, ImageSequence
+
+    label = f"plateau animation bundle {expected_name}"
+    _require_fields(
+        row,
+        ("name", "task", "architectures", "animation_kind", "gif", "final_png", "metadata"),
+        label=label,
+    )
+    if row["name"] != expected_name or row["animation_kind"] != expected_kind:
+        raise PipelineError(f"{label} identity is inconsistent")
+    if row["task"] != expected_task or row["architectures"] != list(expected_architectures):
+        raise PipelineError(f"{label} task or architecture identity is inconsistent")
+    for key, expected in expected_bundle_contract.items():
+        if canonical_hash(row.get(key)) != canonical_hash(expected):
+            raise PipelineError(f"{label} {key} differs from its source-field contract")
+    expected_paths = {
+        "gif": f"animations/{expected_name}.gif",
+        "final_png": f"animations/{expected_name}_final.png",
+        "metadata": f"animations/{expected_name}_metadata.json",
+    }
+    if any(row[name] != path for name, path in expected_paths.items()):
+        raise PipelineError(f"{label} paths are inconsistent")
+    declared = _artifact_file_map(reference)
+    expected_media = {
+        "gif": "image/gif",
+        "final_png": "image/png",
+        "metadata": "application/json",
+    }
+    for name, path in expected_paths.items():
+        entry = declared.get(path)
+        if entry is None or entry.media_type != expected_media[name]:
+            raise PipelineError(f"{label} has an invalid {name} payload declaration")
+
+    metadata_value = store.read_json(reference.artifact_id, expected_paths["metadata"])
+    metadata = _as_object(metadata_value, label=f"{label} metadata")
+    _require_fields(
+        metadata,
+        (
+            "schema_version",
+            "animation_kind",
+            "canvas",
+            "input_checkpoints",
+            "rendered_frame_count",
+            "rendered_frames",
+            "timing",
+            "scales",
+            "labels",
+            "files",
+            "gif_badge",
+            "layout_fixed_across_frames",
+            "checkpoint_panels_synchronized",
+        ),
+        label=f"{label} metadata",
+    )
+    checkpoint_labels = [f"epoch {epoch}" for epoch in checkpoints]
+    if (
+        metadata["schema_version"] != _PLATEAU_SCHEMA_VERSION
+        or metadata["animation_kind"] != expected_kind
+        or metadata["input_checkpoints"] != checkpoint_labels
+        or metadata["rendered_frame_count"] != len(checkpoints) + 1
+    ):
+        raise PipelineError(f"{label} metadata identity or checkpoint axis is inconsistent")
+    if any(
+        metadata[name] is not True
+        for name in (
+            "gif_badge",
+            "layout_fixed_across_frames",
+            "checkpoint_panels_synchronized",
+        )
+    ):
+        raise PipelineError(f"{label} must preserve the fixed synchronized GIF contract")
+    canvas = _as_object(metadata["canvas"], label=f"{label} canvas")
+    if canvas != {"width": 1440, "height": 900}:
+        raise PipelineError(f"{label} canvas differs from the declared fixed layout")
+    files = _as_object(metadata["files"], label=f"{label} files")
+    if files != {
+        "gif": PurePosixPath(expected_paths["gif"]).name,
+        "final_png": PurePosixPath(expected_paths["final_png"]).name,
+        "metadata": PurePosixPath(expected_paths["metadata"]).name,
+    }:
+        raise PipelineError(f"{label} renderer file metadata is inconsistent")
+    orientation, checkpoint, conclusion = timing
+    expected_durations = [orientation] + [checkpoint] * (len(checkpoints) - 1) + [conclusion]
+    expected_roles = ["orientation"] + ["checkpoint"] * (len(checkpoints) - 1) + ["conclusion"]
+    rendered = _as_array(metadata["rendered_frames"], label=f"{label} rendered frames")
+    if len(rendered) != len(expected_durations):
+        raise PipelineError(f"{label} has an invalid rendered frame count")
+    for index, (raw_frame, role, duration) in enumerate(
+        zip(rendered, expected_roles, expected_durations, strict=True)
+    ):
+        frame = _as_object(raw_frame, label=f"{label} rendered frame")
+        source_index = min(index, len(checkpoints) - 1)
+        if frame != {
+            "index": index,
+            "checkpoint": checkpoint_labels[source_index],
+            "role": role,
+            "duration_ms": duration,
+        }:
+            raise PipelineError(f"{label} rendered schedule is inconsistent")
+    timing_metadata = _as_object(metadata["timing"], label=f"{label} timing")
+    if timing_metadata != {
+        "orientation_ms": orientation,
+        "checkpoint_ms": checkpoint,
+        "conclusion_ms": conclusion,
+        "loop": 0,
+    }:
+        raise PipelineError(f"{label} timing metadata differs from config")
+    scales = _as_object(metadata["scales"], label=f"{label} scales")
+    labels = _as_object(metadata["labels"], label=f"{label} labels")
+    x_coordinates = np.asarray(expected_x_coordinates, dtype=np.float64)
+    y_coordinates = np.asarray(expected_y_coordinates, dtype=np.float64)
+    if x_coordinates.ndim != 1 or y_coordinates.ndim != 1:
+        raise PipelineError(f"{label} source coordinate axes are invalid")
+    extent = [
+        float(x_coordinates[0]),
+        float(x_coordinates[-1]),
+        float(y_coordinates[0]),
+        float(y_coordinates[-1]),
+    ]
+    if expected_kind == "real_fake_scalar_fields":
+        if expected_curve_x_range is None or expected_curve_y_range is None:
+            raise PipelineError(f"{label} is missing source-derived curve ranges")
+        expected_scales = {
+            "heatmap": _expected_computed_scale_metadata(expected_scalar_range),
+            "curve_x": _expected_computed_scale_metadata(
+                expected_curve_x_range,
+                padded=True,
+            ),
+            "curve_y": _expected_computed_scale_metadata(
+                expected_curve_y_range,
+                padded=True,
+                include_zero=True,
+            ),
+            "heatmap_extent": extent,
+            "heatmap_x": x_coordinates.tolist(),
+            "heatmap_y": y_coordinates.tolist(),
+            "array_coordinate_contract": "row_zero_is_minimum_y",
+        }
+        if canonical_hash(scales) != canonical_hash(expected_scales):
+            raise PipelineError(
+                f"{label} scales or heatmap coordinates are not exactly source-derived"
+            )
+        expected_estimands = {
+            "heatmap": expected_bundle_contract["scalar_estimand"],
+            "curve": expected_bundle_contract["curve_estimand"],
+        }
+        if canonical_hash(metadata.get("estimands")) != canonical_hash(expected_estimands):
+            raise PipelineError(f"{label} renderer estimands are inconsistent")
+        expected_label = (
+            "2D ‖D(T-I)‖F"
+            if expected_bundle_contract["scalar_estimand"] == _RESIDUAL_PLANE_ESTIMAND
+            else "2D ‖DT‖F"
+        )
+        if (
+            labels.get("scalar") != expected_label
+            or labels.get("heatmap_classification") != "NEW HYBRID"
+        ):
+            raise PipelineError(f"{label} visible scalar label is inconsistent")
+    else:
+        assert architecture_maxima is not None
+        expected_scales = {
+            "rgb_cells": {
+                "display_min": 0.0,
+                "display_max": 1.0,
+                "source": "caller_prepared_with_declared_global_channel_maxima",
+                "normalization_scope": "fixed_across_all_checkpoints_within_architecture",
+                "comparability_contract": (
+                    "per_architecture_channel_normalization_not_absolute_cross_architecture_scale"
+                ),
+                "resnet_channel_maxima": architecture_maxima[0].astype(np.float64).tolist(),
+                "vgg_channel_maxima": architecture_maxima[1].astype(np.float64).tolist(),
+            },
+            "jacobian": _expected_computed_scale_metadata(expected_scalar_range),
+            "plane_extent": extent,
+            "alpha_coordinates": x_coordinates.tolist(),
+            "beta_coordinates": y_coordinates.tolist(),
+            "array_coordinate_contract": "row_zero_is_minimum_y",
+        }
+        if canonical_hash(scales) != canonical_hash(expected_scales):
+            raise PipelineError(
+                f"{label} scales or plane coordinates are not exactly source-derived"
+            )
+        expected_estimands = expected_bundle_contract["jacobian_estimands"]
+        if canonical_hash(metadata.get("jacobian_estimands")) != canonical_hash(expected_estimands):
+            raise PipelineError(f"{label} renderer Jacobian estimands are inconsistent")
+        if (
+            labels.get("jacobian") != "2D ‖·‖F"
+            or labels.get("rgb") != "SOURCE ANALOGUE · THREE-ANCHOR RGB"
+            or labels.get("resnet_jacobian") != "NEW HYBRID · D(T-I)"
+            or labels.get("vgg_jacobian") != "NEW HYBRID · DT"
+            or metadata.get("rgb_estimand")
+            != (
+                "three frozen-context downstream-logit L2 distances encoded as "
+                "per-architecture/channel-normalized RGB; not discovered or stable cells"
+            )
+            or metadata.get("comparison_note") != _ARCHITECTURE_COMPARISON_NOTE
+        ):
+            raise PipelineError(f"{label} row-specific labels or comparison note are invalid")
+
+    gif_bytes = store.read_bytes(reference.artifact_id, expected_paths["gif"])
+    try:
+        with Image.open(io.BytesIO(gif_bytes)) as gif:
+            decoded_durations = [
+                int(frame.info.get("duration", 0)) for frame in ImageSequence.Iterator(gif)
+            ]
+            decoded_sizes = {frame.size for frame in ImageSequence.Iterator(gif)}
+            if (
+                gif.format != "GIF"
+                or gif.n_frames != len(expected_durations)
+                or gif.size != (1440, 900)
+                or decoded_durations != expected_durations
+                or decoded_sizes != {(1440, 900)}
+                or int(gif.info.get("loop", -1)) != 0
+            ):
+                raise PipelineError(f"{label} GIF readback differs from its metadata")
+        with Image.open(
+            io.BytesIO(store.read_bytes(reference.artifact_id, expected_paths["final_png"]))
+        ) as image:
+            if image.format != "PNG" or image.size != (1440, 900):
+                raise PipelineError(f"{label} final PNG has an invalid format or canvas")
+    except PipelineError:
+        raise
+    except (OSError, ValueError, EOFError) as error:
+        raise PipelineError(f"{label} contains an unreadable image") from error
+
+
+def _validate_plateau_animation_artifact(
+    summary: Mapping[str, object],
+    reference: ArtifactRef,
+    store: ArtifactStore,
+    config: LabConfig | None,
+) -> None:
+    """Validate source binding, global normalization, and decoded GIF contracts."""
+
+    label = "plateau animation artifact"
+    if config is None:
+        raise PipelineError(f"{label} validation requires the signed configuration")
+    _require_fields(
+        summary,
+        (
+            "task",
+            "checkpoint_epochs",
+            "source_artifacts",
+            "timing_ms",
+            "bundles",
+            "normalization",
+            "jacobian_display_contract",
+            "source_separation",
+            "nonclaims",
+        ),
+        label=label,
+    )
+    checkpoints = tuple(config.experiment1.checkpoints)
+    if summary["task"] != "experiment1_activation_geometry_animations" or summary[
+        "checkpoint_epochs"
+    ] != list(checkpoints):
+        raise PipelineError(f"{label} task or checkpoint axis is inconsistent")
+    upstreams = thaw_json(reference.manifest.metadata.get("upstream_artifacts"))
+    if not isinstance(upstreams, dict) or set(upstreams) != {
+        "exp1.plateau.synthetic",
+        "exp1.plateau.cifar",
+    }:
+        raise PipelineError(f"{label} must bind exactly its two collection artifacts")
+    sources = _as_object(summary["source_artifacts"], label=f"{label} source artifacts")
+    if sources != upstreams:
+        raise PipelineError(f"{label} source summary differs from immutable upstream binding")
+
+    synthetic_id = upstreams["exp1.plateau.synthetic"]
+    if not isinstance(synthetic_id, str) or not _DIGEST_RE.fullmatch(synthetic_id):
+        raise PipelineError(f"{label} synthetic source artifact id is invalid")
+    synthetic_reference = store.get(synthetic_id, verify=True)
+    if synthetic_reference.manifest.kind != "stage/exp1-plateau-synthetic":
+        raise PipelineError(f"{label} synthetic source has the wrong artifact kind")
+    synthetic_value = store.read_json(synthetic_id, "summary.json")
+    synthetic_summary = _as_object(synthetic_value, label=f"{label} synthetic source summary")
+    if synthetic_summary.get("schema_version") != _PLATEAU_SCHEMA_VERSION or synthetic_summary.get(
+        "checkpoint_epochs"
+    ) != list(checkpoints):
+        raise PipelineError(f"{label} synthetic source checkpoint axis is inconsistent")
+    expected_synthetic_display = {
+        "protocol_version": config.experiment1.plateau_protocol.protocol_version,
+        "local_source_array": _RESIDUAL_LOCAL_PLANE_JACOBIAN,
+        "anchor_source_array": _RESIDUAL_ANCHOR_PLANE_JACOBIAN,
+        "estimand": _RESIDUAL_PLANE_ESTIMAND,
+    }
+    if canonical_hash(synthetic_summary.get("jacobian_display_contract")) != canonical_hash(
+        expected_synthetic_display
+    ):
+        raise PipelineError(f"{label} synthetic source display contract is inconsistent")
+    scalar_ranges: dict[str, list[float]] = {
+        "synthetic_real_fake": [float("inf"), float("-inf")],
+        "cifar_resnet_real_fake": [float("inf"), float("-inf")],
+        "cifar_vgg_real_fake": [float("inf"), float("-inf")],
+        "cifar_architecture_cells": [float("inf"), float("-inf")],
+    }
+    curve_x_ranges: dict[str, list[float]] = {
+        name: [float("inf"), float("-inf")]
+        for name in (
+            "synthetic_real_fake",
+            "cifar_resnet_real_fake",
+            "cifar_vgg_real_fake",
+        )
+    }
+    curve_y_ranges = {name: list(bounds) for name, bounds in curve_x_ranges.items()}
+    coordinate_axes: dict[str, np.ndarray] = {}
+
+    def update_range(name: str, field: np.ndarray) -> None:
+        bounds = scalar_ranges[name]
+        bounds[0] = min(bounds[0], float(field.min()))
+        bounds[1] = max(bounds[1], float(field.max()))
+
+    def update_curve_ranges(name: str, coordinates: np.ndarray, curves: np.ndarray) -> None:
+        for ranges, values in (
+            (curve_x_ranges, coordinates),
+            (curve_y_ranges, curves),
+        ):
+            bounds = ranges[name]
+            bounds[0] = min(bounds[0], float(values.min()))
+            bounds[1] = max(bounds[1], float(values.max()))
+
+    def bind_coordinate_axis(name: str, values: np.ndarray) -> None:
+        axis = np.asarray(values, dtype=np.float64)
+        if (
+            axis.ndim != 1
+            or len(axis) < 2
+            or not np.all(np.isfinite(axis))
+            or np.any(np.diff(axis) <= 0.0)
+        ):
+            raise PipelineError(f"{label} {name} coordinate axis is invalid")
+        existing = coordinate_axes.get(name)
+        if existing is None:
+            coordinate_axes[name] = axis.copy()
+        elif not np.array_equal(existing, axis):
+            raise PipelineError(f"{label} {name} coordinate axis changes across checkpoints")
+
+    synthetic_rows = _as_array(
+        synthetic_summary.get("checkpoint_rows"),
+        label=f"{label} synthetic source rows",
+    )
+    if len(synthetic_rows) != len(checkpoints):
+        raise PipelineError(f"{label} synthetic source row count is inconsistent")
+    for epoch, raw_row in zip(checkpoints, synthetic_rows, strict=True):
+        row = _as_object(raw_row, label=f"{label} synthetic source row")
+        path = f"checkpoints/epoch_{epoch:05d}/arrays.npz"
+        if row.get("epoch") != epoch or row.get("arrays") != path:
+            raise PipelineError(f"{label} synthetic source coordinates are inconsistent")
+        residual_field = _animation_npz_member(
+            store,
+            synthetic_id,
+            path,
+            _RESIDUAL_LOCAL_PLANE_JACOBIAN,
+            label=f"{label} synthetic epoch {epoch}",
+        )
+        _animation_npz_member(
+            store,
+            synthetic_id,
+            path,
+            _RAW_LOCAL_PLANE_JACOBIAN,
+            label=f"{label} synthetic epoch {epoch} raw field",
+        )
+        if residual_field.ndim != 4 or residual_field.shape[0] != 2:
+            raise PipelineError(f"{label} synthetic residual plane field has an invalid shape")
+        local_axis = _animation_npz_member(
+            store,
+            synthetic_id,
+            path,
+            "local_axis",
+            label=f"{label} synthetic epoch {epoch} local axis",
+        )
+        bind_coordinate_axis("synthetic_real_fake", local_axis)
+        if residual_field.shape[2:] != (len(local_axis), len(local_axis)):
+            raise PipelineError(f"{label} synthetic local field does not align with its axis")
+        update_range(
+            "synthetic_real_fake",
+            np.maximum(residual_field, 0.0).mean(axis=1),
+        )
+        path_axis = _animation_npz_member(
+            store,
+            synthetic_id,
+            path,
+            "path_coefficients",
+            label=f"{label} synthetic epoch {epoch} path axis",
+        )
+        path_response = _animation_npz_member(
+            store,
+            synthetic_id,
+            path,
+            "path_response_l2",
+            label=f"{label} synthetic epoch {epoch} path response",
+        )
+        if (
+            path_axis.ndim != 1
+            or path_response.ndim != 4
+            or path_response.shape[0] != 2
+            or path_response.shape[-1] != len(path_axis)
+        ):
+            raise PipelineError(f"{label} synthetic path profile has an invalid shape")
+        bind_coordinate_axis("synthetic_real_fake_curve", path_axis)
+        update_curve_ranges(
+            "synthetic_real_fake",
+            path_axis,
+            np.median(np.maximum(path_response, 0.0), axis=(1, 2)),
+        )
+
+    cifar_id = upstreams["exp1.plateau.cifar"]
+    if not isinstance(cifar_id, str) or not _DIGEST_RE.fullmatch(cifar_id):
+        raise PipelineError(f"{label} CIFAR source artifact id is invalid")
+    cifar_reference = store.get(cifar_id, verify=True)
+    if cifar_reference.manifest.kind != "stage/exp1-plateau-cifar":
+        raise PipelineError(f"{label} CIFAR source has the wrong artifact kind")
+    cifar_value = store.read_json(cifar_id, "summary.json")
+    cifar_summary = _as_object(cifar_value, label=f"{label} CIFAR source summary")
+    if cifar_summary.get("schema_version") != _PLATEAU_SCHEMA_VERSION:
+        raise PipelineError(f"{label} CIFAR source schema is inconsistent")
+    expected_cifar_display = {
+        "protocol_version": config.experiment1.plateau_protocol.protocol_version,
+        "resnet": {
+            "local_source_array": _RESIDUAL_LOCAL_PLANE_JACOBIAN,
+            "anchor_source_array": _RESIDUAL_ANCHOR_PLANE_JACOBIAN,
+            "estimand": _RESIDUAL_PLANE_ESTIMAND,
+        },
+        "vgg": {
+            "local_source_array": _RAW_LOCAL_PLANE_JACOBIAN,
+            "anchor_source_array": _RAW_ANCHOR_PLANE_JACOBIAN,
+            "estimand": _RAW_PLANE_ESTIMAND,
+        },
+        "comparison_scope": "descriptive_confounded_side_by_side_with_row_specific_operators",
+    }
+    if canonical_hash(cifar_summary.get("jacobian_display_contract")) != canonical_hash(
+        expected_cifar_display
+    ):
+        raise PipelineError(f"{label} CIFAR source display contract is inconsistent")
+    rows = _as_array(cifar_summary.get("checkpoint_rows"), label=f"{label} CIFAR rows")
+    expected_coordinates = tuple(
+        (architecture, epoch) for architecture in ("resnet", "vgg") for epoch in checkpoints
+    )
+    if len(rows) != len(expected_coordinates):
+        raise PipelineError(f"{label} CIFAR source row count is inconsistent")
+    raw_maxima: dict[str, np.ndarray] = {
+        "resnet": np.zeros(3, dtype=np.float64),
+        "vgg": np.zeros(3, dtype=np.float64),
+    }
+    for (architecture, epoch), raw_row in zip(expected_coordinates, rows, strict=True):
+        row = _as_object(raw_row, label=f"{label} CIFAR source row")
+        if row.get("architecture") != architecture or row.get("epoch") != epoch:
+            raise PipelineError(f"{label} CIFAR source coordinates are inconsistent")
+        artifact_id = row.get("artifact_id")
+        if not isinstance(artifact_id, str) or not _DIGEST_RE.fullmatch(artifact_id):
+            raise PipelineError(f"{label} CIFAR child artifact id is invalid")
+        field = _animation_npz_member(
+            store,
+            artifact_id,
+            "arrays.npz",
+            "anchor_output_distances",
+            label=f"{label} {architecture} epoch {epoch}",
+        )
+        if field.ndim != 3 or field.shape[-1] != 3 or np.any(field < -1e-12):
+            raise PipelineError(f"{label} source anchor distances have an invalid shape")
+        local_axis = _animation_npz_member(
+            store,
+            artifact_id,
+            "arrays.npz",
+            "local_axis",
+            label=f"{label} {architecture} epoch {epoch} local axis",
+        )
+        anchor_axis = _animation_npz_member(
+            store,
+            artifact_id,
+            "arrays.npz",
+            "anchor_axis",
+            label=f"{label} {architecture} epoch {epoch} anchor axis",
+        )
+        bind_coordinate_axis(f"cifar_{architecture}_real_fake", local_axis)
+        bind_coordinate_axis("cifar_architecture_cells", anchor_axis)
+        if field.shape[:2] != (len(anchor_axis), len(anchor_axis)):
+            raise PipelineError(f"{label} anchor distances do not align with their axis")
+        raw_maxima[architecture] = np.maximum(
+            raw_maxima[architecture],
+            np.maximum(field, 0.0).max(axis=(0, 1)),
+        )
+        local_name = (
+            _RESIDUAL_LOCAL_PLANE_JACOBIAN
+            if architecture == "resnet"
+            else _RAW_LOCAL_PLANE_JACOBIAN
+        )
+        anchor_name = (
+            _RESIDUAL_ANCHOR_PLANE_JACOBIAN
+            if architecture == "resnet"
+            else _RAW_ANCHOR_PLANE_JACOBIAN
+        )
+        local_field = _animation_npz_member(
+            store,
+            artifact_id,
+            "arrays.npz",
+            local_name,
+            label=f"{label} {architecture} epoch {epoch} local field",
+        )
+        anchor_field = _animation_npz_member(
+            store,
+            artifact_id,
+            "arrays.npz",
+            anchor_name,
+            label=f"{label} {architecture} epoch {epoch} anchor field",
+        )
+        if architecture == "resnet":
+            _animation_npz_member(
+                store,
+                artifact_id,
+                "arrays.npz",
+                _RAW_LOCAL_PLANE_JACOBIAN,
+                label=f"{label} ResNet epoch {epoch} retained raw local field",
+            )
+            _animation_npz_member(
+                store,
+                artifact_id,
+                "arrays.npz",
+                _RAW_ANCHOR_PLANE_JACOBIAN,
+                label=f"{label} ResNet epoch {epoch} retained raw anchor field",
+            )
+        if local_field.ndim != 4 or local_field.shape[0] != 2:
+            raise PipelineError(f"{label} selected local plane field has an invalid shape")
+        if anchor_field.ndim != 3 or anchor_field.shape[0] != 3:
+            raise PipelineError(f"{label} selected anchor plane field has an invalid shape")
+        if local_field.shape[2:] != (len(local_axis), len(local_axis)):
+            raise PipelineError(f"{label} selected local field does not align with its axis")
+        if anchor_field.shape[1:] != (len(anchor_axis), len(anchor_axis)):
+            raise PipelineError(f"{label} selected anchor field does not align with its axis")
+        if np.any(local_field < -1e-12) or np.any(anchor_field < -1e-12):
+            raise PipelineError(f"{label} selected Jacobian fields must be nonnegative")
+        update_range(
+            f"cifar_{architecture}_real_fake",
+            np.maximum(local_field, 0.0).mean(axis=1),
+        )
+        update_range(
+            "cifar_architecture_cells",
+            np.maximum(anchor_field, 0.0).mean(axis=0),
+        )
+        path_axis = _animation_npz_member(
+            store,
+            artifact_id,
+            "arrays.npz",
+            "path_coefficients",
+            label=f"{label} {architecture} epoch {epoch} path axis",
+        )
+        path_response = _animation_npz_member(
+            store,
+            artifact_id,
+            "arrays.npz",
+            "path_response_l2",
+            label=f"{label} {architecture} epoch {epoch} path response",
+        )
+        if (
+            path_axis.ndim != 1
+            or path_response.ndim != 4
+            or path_response.shape[0] != 2
+            or path_response.shape[-1] != len(path_axis)
+        ):
+            raise PipelineError(f"{label} CIFAR path profile has an invalid shape")
+        bind_coordinate_axis(f"cifar_{architecture}_real_fake_curve", path_axis)
+        update_curve_ranges(
+            f"cifar_{architecture}_real_fake",
+            path_axis,
+            np.median(np.maximum(path_response, 0.0), axis=(1, 2)),
+        )
+    if any(np.any(value <= 0.0) for value in raw_maxima.values()):
+        raise PipelineError(f"{label} source anchor distance channels need positive range")
+
+    normalization = _as_object(summary["normalization"], label=f"{label} normalization")
+    expected_normalization = {
+        "real_fake_scalar_scales": "global within each bundle across all checkpoints",
+        "real_fake_curve_scales": "global within each bundle across all checkpoints",
+        "cell_rgb_raw_field": "anchor_output_distances",
+        "cell_rgb_transform": "clip(1 - distance / channel_max, 0, 1)",
+        "cell_rgb_scope": "per architecture and anchor channel across every checkpoint",
+        "resnet_channel_maxima": raw_maxima["resnet"].tolist(),
+        "vgg_channel_maxima": raw_maxima["vgg"].tolist(),
+        "jacobian_scale": (
+            "one numerical display scale across row-specific estimands and all checkpoints; "
+            "not an equivalent-operator or causal comparison"
+        ),
+    }
+    if canonical_hash(normalization) != canonical_hash(expected_normalization):
+        raise PipelineError(f"{label} normalization is not derived from raw source distances")
+
+    protocol = config.experiment1.plateau_protocol
+    expected_animation_display = {
+        "protocol_version": protocol.protocol_version,
+        "configured_selection": protocol.animation_jacobian_selection,
+        "synthetic": {
+            "source_array": _RESIDUAL_LOCAL_PLANE_JACOBIAN,
+            "estimand": _RESIDUAL_PLANE_ESTIMAND,
+        },
+        "resnet": {
+            "local_source_array": _RESIDUAL_LOCAL_PLANE_JACOBIAN,
+            "anchor_source_array": _RESIDUAL_ANCHOR_PLANE_JACOBIAN,
+            "estimand": _RESIDUAL_PLANE_ESTIMAND,
+        },
+        "vgg": {
+            "local_source_array": _RAW_LOCAL_PLANE_JACOBIAN,
+            "anchor_source_array": _RAW_ANCHOR_PLANE_JACOBIAN,
+            "estimand": _RAW_PLANE_ESTIMAND,
+        },
+    }
+    if canonical_hash(summary["jacobian_display_contract"]) != canonical_hash(
+        expected_animation_display
+    ):
+        raise PipelineError(f"{label} selected Jacobian fields differ from signed protocol")
+    timing = (
+        protocol.orientation_frame_ms,
+        protocol.intermediate_frame_ms,
+        protocol.final_frame_ms,
+    )
+    if summary["timing_ms"] != {
+        "orientation": timing[0],
+        "checkpoint": timing[1],
+        "conclusion": timing[2],
+    }:
+        raise PipelineError(f"{label} timing differs from config")
+    bundles = _as_array(summary["bundles"], label=f"{label} bundles")
+    expected_bundles = (
+        (
+            "synthetic_real_fake",
+            "real_fake_scalar_fields",
+            "three_class_gaussian_mixture",
+            ("normalization_free_residual_mlp",),
+            {
+                "scalar_source_array": _RESIDUAL_LOCAL_PLANE_JACOBIAN,
+                "scalar_estimand": _RESIDUAL_PLANE_ESTIMAND,
+                "scalar_selection": "residual_update_for_residual_transition",
+                "curve_estimand": _PLATEAU_CURVE_ESTIMAND,
+            },
+        ),
+        (
+            "cifar_resnet_real_fake",
+            "real_fake_scalar_fields",
+            "cifar10",
+            ("tracking2_resnet18_v2_width64",),
+            {
+                "scalar_source_array": _RESIDUAL_LOCAL_PLANE_JACOBIAN,
+                "scalar_estimand": _RESIDUAL_PLANE_ESTIMAND,
+                "scalar_selection": "residual_update_for_residual_transition",
+                "curve_estimand": _PLATEAU_CURVE_ESTIMAND,
+            },
+        ),
+        (
+            "cifar_vgg_real_fake",
+            "real_fake_scalar_fields",
+            "cifar10",
+            ("tracking2_vgg19_bn_width1_classifier512",),
+            {
+                "scalar_source_array": _RAW_LOCAL_PLANE_JACOBIAN,
+                "scalar_estimand": _RAW_PLANE_ESTIMAND,
+                "scalar_selection": "raw_transition_for_nonresidual_transition",
+                "curve_estimand": _PLATEAU_CURVE_ESTIMAND,
+            },
+        ),
+        (
+            "cifar_architecture_cells",
+            "architecture_cells_and_jacobians",
+            "cifar10",
+            (
+                "tracking2_resnet18_v2_width64",
+                "tracking2_vgg19_bn_width1_classifier512",
+            ),
+            {
+                "jacobian_source_arrays": {
+                    "resnet": _RESIDUAL_ANCHOR_PLANE_JACOBIAN,
+                    "vgg": _RAW_ANCHOR_PLANE_JACOBIAN,
+                },
+                "jacobian_estimands": {
+                    "resnet": _RESIDUAL_PLANE_ESTIMAND,
+                    "vgg": _RAW_PLANE_ESTIMAND,
+                },
+                "comparison_scope": (
+                    "descriptive_confounded_side_by_side_with_row_specific_operators"
+                ),
+            },
+        ),
+    )
+    if len(bundles) != len(expected_bundles):
+        raise PipelineError(f"{label} must contain exactly four animation bundles")
+    for raw_row, (name, kind, task, architectures, bundle_contract) in zip(
+        bundles,
+        expected_bundles,
+        strict=True,
+    ):
+        row = _as_object(raw_row, label=f"{label} bundle")
+        _validate_animation_image_bundle(
+            reference,
+            store,
+            row,
+            checkpoints=checkpoints,
+            expected_name=name,
+            expected_kind=kind,
+            expected_task=task,
+            expected_architectures=architectures,
+            timing=timing,
+            expected_bundle_contract=bundle_contract,
+            expected_scalar_range=tuple(scalar_ranges[name]),
+            expected_x_coordinates=coordinate_axes[name],
+            expected_y_coordinates=coordinate_axes[name],
+            expected_curve_x_range=(
+                tuple(curve_x_ranges[name]) if kind == "real_fake_scalar_fields" else None
+            ),
+            expected_curve_y_range=(
+                tuple(curve_y_ranges[name]) if kind == "real_fake_scalar_fields" else None
+            ),
+            architecture_maxima=(raw_maxima["resnet"], raw_maxima["vgg"])
+            if kind == "architecture_cells_and_jacobians"
+            else None,
+        )
+    expected_paths = {"summary.json"}
+    for name, _kind, _task, _architectures, _contract in expected_bundles:
+        expected_paths.update(
+            {
+                f"animations/{name}.gif",
+                f"animations/{name}_final.png",
+                f"animations/{name}_metadata.json",
+            }
+        )
+    if set(_artifact_file_map(reference)) != expected_paths:
+        raise PipelineError(f"{label} file set differs from its four declared bundles")
+
+
 def _validate_named_payload_schema(
     schema_id: str | None,
     payloads: Mapping[str, Mapping[str, object]],
@@ -1411,6 +3033,18 @@ def _validate_named_payload_schema(
         return
     if schema_id == "tracking2-inputs-v1":
         _validate_inputs_artifact(payloads["inputs.json"], reference, store, config)
+    elif schema_id == "tracking2-vgg-inputs-v1":
+        _validate_vgg_inputs_artifact(payloads["inputs.json"], reference, store, config)
+    elif schema_id == "synthetic-plateau-task-v1":
+        _validate_synthetic_plateau_task_artifact(
+            payloads["inventory.json"], reference, store, config
+        )
+    elif schema_id == "plateau-collection-v2":
+        _validate_plateau_collection_artifact(payloads["summary.json"], reference, store, config)
+    elif schema_id == "plateau-cifar-collection-v2":
+        _validate_plateau_cifar_artifact(payloads["summary.json"], reference, store, config)
+    elif schema_id == "plateau-animation-v2":
+        _validate_plateau_animation_artifact(payloads["summary.json"], reference, store, config)
     elif schema_id == "probe-plan-v1":
         _validate_probe_artifact(payloads["plan.json"], declared_paths, reference, store, config)
     elif schema_id == "mechanical-result-v1":
@@ -1565,6 +3199,21 @@ def _validation_referenced_artifact_ids(
                 referenced.update(
                     artifact_id
                     for artifact_id in instance_ids
+                    if isinstance(artifact_id, str) and _DIGEST_RE.fullmatch(artifact_id)
+                )
+    if stage.payload_schema_id == "plateau-cifar-collection-v2":
+        payload = json_payloads.get("summary.json")
+        if payload is not None:
+            reducer_id = payload.get("reducer_artifact_id")
+            if isinstance(reducer_id, str) and _DIGEST_RE.fullmatch(reducer_id):
+                referenced.add(reducer_id)
+            rows = payload.get("checkpoint_rows")
+            if isinstance(rows, Sequence) and not isinstance(rows, (str, bytes)):
+                referenced.update(
+                    artifact_id
+                    for row in rows
+                    if isinstance(row, Mapping)
+                    for artifact_id in (row.get("artifact_id"),)
                     if isinstance(artifact_id, str) and _DIGEST_RE.fullmatch(artifact_id)
                 )
     return tuple(sorted(referenced))
@@ -1859,6 +3508,53 @@ DEFAULT_STAGES = StageRegistry(
             payload_schema_id="tracking2-inputs-v1",
         ),
         StageSpec(
+            "inputs.tracking2_vgg",
+            "Validate every hash-pinned exploratory VGG model, checkpoint, dataset, "
+            "and criticality input.",
+            config_paths=(
+                "inputs.tracking2_vgg",
+                "experiment1.checkpoints",
+                "experiment1.probe_banks",
+            ),
+            implementation=ImplementationStatus.RUNNABLE,
+            expected_artifact_kind="stage/inputs-tracking2-vgg",
+            required_payload_paths=("inputs.json", "manifest.yaml", "criticality.json"),
+            result_schema_version=1,
+            payload_schema_id="tracking2-vgg-inputs-v1",
+        ),
+        StageSpec(
+            "exp1.synthetic_task",
+            "Train the deterministic three-class residual-MLP checkpoint trajectory.",
+            config_paths=(
+                "protocol.root_seed",
+                "experiment1.checkpoints",
+                "experiment1.synthetic_plateau_task",
+            ),
+            implementation=ImplementationStatus.RUNNABLE,
+            expected_artifact_kind="stage/exp1-synthetic-task",
+            required_payload_paths=("inventory.json",),
+            result_schema_version=1,
+            payload_schema_id="synthetic-plateau-task-v1",
+        ),
+        StageSpec(
+            "exp1.plateau.synthetic",
+            "Collect replayable real/fake paths, three-anchor fields, and Jacobian diagnostics "
+            "for the synthetic residual trajectory.",
+            dependencies=("exp1.synthetic_task",),
+            config_paths=(
+                "protocol.root_seed",
+                "experiment1.checkpoints",
+                "experiment1.synthetic_plateau_task.intervention_block",
+                "experiment1.plateau_protocol",
+            ),
+            implementation=ImplementationStatus.RUNNABLE,
+            estimate_shards=lambda config: len(config.experiment1.checkpoints),
+            expected_artifact_kind="stage/exp1-plateau-synthetic",
+            required_payload_paths=("summary.json",),
+            result_schema_version=2,
+            payload_schema_id="plateau-collection-v2",
+        ),
+        StageSpec(
             "exp1.probe_banks",
             "Freeze train/test image identities and image-level bootstrap namespaces.",
             dependencies=("inputs.tracking2",),
@@ -1873,6 +3569,47 @@ DEFAULT_STAGES = StageRegistry(
             required_payload_paths=("plan.json",),
             result_schema_version=1,
             payload_schema_id="probe-plan-v1",
+        ),
+        StageSpec(
+            "exp1.plateau.cifar",
+            "Collect resumable checkpoint shards for matched ResNet/VGG CIFAR activation "
+            "paths, three-anchor fields, and Jacobian diagnostics.",
+            dependencies=("inputs.tracking2", "inputs.tracking2_vgg", "exp1.probe_banks"),
+            config_paths=(
+                "protocol.root_seed",
+                "runtime.device",
+                "runtime.dtype",
+                "experiment1.checkpoints",
+                "experiment1.input_recipes",
+                "experiment1.plateau_protocol",
+            ),
+            implementation=ImplementationStatus.RUNNABLE,
+            estimate_shards=lambda config: 2 * len(config.experiment1.checkpoints),
+            expected_artifact_kind="stage/exp1-plateau-cifar",
+            required_payload_paths=("summary.json",),
+            result_schema_version=2,
+            payload_schema_id="plateau-cifar-collection-v2",
+        ),
+        StageSpec(
+            "exp1.plateau.animations",
+            "Render fixed-scale, source-bound GIFs for real/fake geometry and synchronized "
+            "ResNet/VGG three-anchor cells plus Jacobian diagnostics.",
+            dependencies=("exp1.plateau.synthetic", "exp1.plateau.cifar"),
+            config_paths=(
+                "experiment1.checkpoints",
+                "experiment1.plateau_protocol.protocol_version",
+                "experiment1.plateau_protocol.plane_jacobian_fields",
+                "experiment1.plateau_protocol.animation_jacobian_selection",
+                "experiment1.plateau_protocol.global_animation_scales",
+                "experiment1.plateau_protocol.orientation_frame_ms",
+                "experiment1.plateau_protocol.intermediate_frame_ms",
+                "experiment1.plateau_protocol.final_frame_ms",
+            ),
+            implementation=ImplementationStatus.RUNNABLE,
+            expected_artifact_kind="stage/exp1-plateau-animations",
+            required_payload_paths=("summary.json",),
+            result_schema_version=2,
+            payload_schema_id="plateau-animation-v2",
         ),
         StageSpec(
             "exp1.mechanical",

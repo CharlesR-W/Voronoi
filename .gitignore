@@ -8,10 +8,19 @@ dist/
 .ruff_cache/
 .coverage
 htmlcov/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa
+id_ed25519
 
 # Runtime products are reproducible from configs and immutable manifests.
 artifacts/objects/
 artifacts/.staging/
+# Local measured Experiment 1 store; canonical IDs are recorded in tracked docs.
+artifacts/exp1-measured/
 runs/
 reports/*
 !artifacts/README.md
@@ -19,3 +28,7 @@ reports/*
 !reports/MOCKUP/
 reports/MOCKUP/*
 !reports/MOCKUP/.gitkeep
+
+# Source PDFs are retained as local audit copies. Their arXiv distribution licenses
+# do not grant this repository an independent redistribution right.
+references/papers/*.pdf

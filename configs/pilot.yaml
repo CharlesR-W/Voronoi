@@ -22,6 +22,12 @@ inputs:
     transplant_results: null
     expected_model: preactivation_resnet18_v2_width64
     read_only: true
+  tracking2_vgg:
+    manifest: configs/inputs/tracking2_vgg_seed0.yaml
+    manifest_sha256: 7da25515b508343aecddebc6e26ea0548f35c158c88b399ccb36803e8b803ebd
+    root: ../Experiments/Tracking2
+    expected_model: vgg19_bn_classifier512_width1
+    read_only: true
 
 experiment1:
   checkpoints: [0, 1, 5, 20, 100]
@@ -93,6 +99,57 @@ experiment1:
     denominator_floor: 1.0e-12
     sample_axis: whole_tensor
     aggregation: median_linear_p95
+  # Small residual-stream training task used to verify the collection path on
+  # known data before interpreting the CIFAR diagnostics.
+  synthetic_plateau_task:
+    protocol_version: 1
+    task: three_class_gaussian_mixture
+    architecture: normalization_free_residual_mlp
+    input_dimensions: 2
+    classes: 3
+    train_samples_per_class: 256
+    test_samples_per_class: 128
+    class_radius: 3.0
+    noise_standard_deviation: 0.55
+    hidden_width: 32
+    residual_blocks: 4
+    intervention_block: 1
+    epochs: 100
+    batch_size: 64
+    optimizer: sgd
+    learning_rate: 0.05
+    momentum: 0.9
+    weight_decay: 0.0
+  # This protocol deliberately records source-faithful response fields and our
+  # new CNN Jacobian diagnostic as separate named quantities.
+  plateau_protocol:
+    protocol_version: 2
+    status: exploratory_hybrid
+    resnet_cut: stage2.block1
+    vgg_cut: stage2.conv1
+    spatial_site: center
+    covariance_fit_images: 256
+    centers_per_kind: 4
+    fake_distribution: empirical_covariance_gaussian
+    perturbation_directions_per_center: 8
+    perturbation_steps: 37
+    perturbation_max_scale: 1.0
+    local_surface_grid_points: 17
+    local_surface_extent: 0.75
+    three_anchor_count: 3
+    three_anchor_grid_points: 21
+    three_anchor_axis_min: -0.25
+    three_anchor_axis_max: 1.25
+    distance_readout: logits_l2_and_kl
+    plane_jacobian_fields: raw_transition_and_residual_update
+    animation_jacobian_selection: residual_update_for_residual_raw_transition_for_nonresidual
+    center_jacobian_estimator: hutchinson_next_transition
+    hutchinson_probes: 8
+    intervention_batch_size: 64
+    global_animation_scales: true
+    orientation_frame_ms: 3000
+    intermediate_frame_ms: 1000
+    final_frame_ms: 6000
   probe_banks:
     fit_train_images: 2000
     geometry_test_images: 2000

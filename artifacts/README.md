@@ -11,3 +11,8 @@ inputs rather than duplicated artifact payloads.
 
 Mutable run indexes live under `runs/` and point to immutable objects. They are also
 ignored because they are machine- and execution-specific.
+
+The canonical local Experiment 1 collection uses a separate ignored store at
+`artifacts/exp1-measured/`. Its exact parent/child IDs, array inventory, verification
+commands, and immutability rules are recorded in
+[`EXPERIMENT_1_DATA.md`](EXPERIMENT_1_DATA.md).

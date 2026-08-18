@@ -1,0 +1,88 @@
+schema_version: 1
+name: tracking2-seed0-vgg19bn
+lineage_quality: exploratory_legacy
+lineage_note: >-
+  Local historical training-only trajectory. The producing JSON omitted source revision,
+  dependency versions, dataset hashes, and checkpoint hashes; this manifest pins the bytes
+  observed now but cannot retroactively establish their producing environment.
+root: ../Experiments/Tracking2
+observed_repository_revision: c812268a0d1f5404cc658eaaba1e8929c2da229a
+read_only: true
+
+architecture:
+  module: tracking2.models
+  class_name: InstrumentedVGG19
+  num_classes: 10
+  classifier_width: 512
+  width_multiplier: 1.0
+  batch_norm: true
+  source:
+    path: src/tracking2/models.py
+    size_bytes: 13081
+    sha256: f43c076edb9b0b95b65f5d73747211f7bab72f3076f740fb8be0823ecc7709d9
+  state_dict_tensors: 118
+  state_dict_elements: 20576858
+  dtype_tensor_counts:
+    float32: 102
+    int64: 16
+  dtype_element_counts:
+    float32: 20576842
+    int64: 16
+
+training:
+  seed: 0
+  train_size: 50000
+  test_size: 10000
+  epochs: 100
+  batch_size: 128
+  learning_rate: 0.05
+  weight_decay: 0.0005
+  checkpoint_epochs: [0, 1, 5, 20, 100]
+  lr_milestones: [30, 60, 90]
+  classifier_width: 512
+  width_multiplier: 1.0
+  batch_norm: true
+  device: cuda
+  amp: true
+  target_epoch: 100
+
+checkpoints:
+  - epoch: 0
+    path: artifacts/vgg_checkpoints/seed0/checkpoint_epoch0.pt
+    size_bytes: 82343754
+    sha256: 329eb1b8da5f909443d7f2515735314cbd646d037126e4ba82c06988603c93d6
+  - epoch: 1
+    path: artifacts/vgg_checkpoints/seed0/checkpoint_epoch1.pt
+    size_bytes: 82343754
+    sha256: 4f1b9c609b7de27fef0988bbb6a0d746bcff8fd9b264d8a064e4c96775e94f90
+  - epoch: 5
+    path: artifacts/vgg_checkpoints/seed0/checkpoint_epoch5.pt
+    size_bytes: 82343754
+    sha256: d77e8e0fedbfa4422d07148be869ac31edbfc117f72d8280c32b4fdd5d6b953c
+  - epoch: 20
+    path: artifacts/vgg_checkpoints/seed0/checkpoint_epoch20.pt
+    size_bytes: 82343876
+    sha256: e907929e48061d597a2a9970141b866e229f69227a5cb7848b9a6116af2ee985
+  - epoch: 100
+    path: artifacts/vgg_checkpoints/seed0/checkpoint_epoch100.pt
+    size_bytes: 82343998
+    sha256: 7aa1a5f4525b3e17ee099ceb82eb9937dd3c5c91696f04735222d5e9081edf3e
+
+datasets:
+  backend: parquet
+  train:
+    path: data/cifar10-train.parquet
+    size_bytes: 119705255
+    sha256: 8428b53a88a11ac374111006708df51469e315a22ac6d66470afd9c78d2ae883
+  test:
+    path: data/cifar10-test.parquet
+    size_bytes: 23940850
+    sha256: 841389e6f2d64f28bf17310e430aebac20ec3ba611a3c5e231dc93c645ce84de
+
+training_record:
+  schema_version: 1
+  experiment: vgg_checkpoint_training
+  file:
+    path: artifacts/vgg_checkpoints/seed0/criticality.json
+    size_bytes: 2116
+    sha256: 0f2d95b9914c042ffc4cc20c7b737031d47cad1bd465807bbe872aef7e576467

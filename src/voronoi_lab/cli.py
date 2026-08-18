@@ -35,7 +35,11 @@ from voronoi_lab.pipeline import (
 )
 from voronoi_lab.receipts import verify_run_receipt
 from voronoi_lab.reporting import build_report
-from voronoi_lab.stage_handlers import default_handlers, tracking2_adapter_from_config
+from voronoi_lab.stage_handlers import (
+    default_handlers,
+    tracking2_adapter_from_config,
+    tracking2_vgg_adapter_from_config,
+)
 
 EXIT_ERROR = 1
 EXIT_USAGE = 2
@@ -99,6 +103,17 @@ def _validate_command(args: argparse.Namespace) -> int:
             "manifest_sha256": sha256_file(manifest_path),
             "transplant_rows": len(rows),
             "validated_files": {name: str(path) for name, path in sorted(validated.items())},
+        }
+        vgg_manifest_path, vgg_adapter = tracking2_vgg_adapter_from_config(config, root)
+        vgg_validated = vgg_adapter.validate_all()
+        training_record = vgg_adapter.read_training_record()
+        result["tracking2_vgg"] = {
+            "criticality_experiment": training_record["experiment"],
+            "external_root": str(vgg_adapter.root),
+            "lineage_quality": vgg_adapter.manifest.lineage_quality,
+            "manifest_path": str(vgg_manifest_path),
+            "manifest_sha256": sha256_file(vgg_manifest_path),
+            "validated_files": {name: str(path) for name, path in sorted(vgg_validated.items())},
         }
     _emit(result, as_json=args.json)
     return 0

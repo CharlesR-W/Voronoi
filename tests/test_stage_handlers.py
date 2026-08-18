@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import io
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,8 +14,15 @@ import yaml
 from tests.tracking2_fixture import with_tracking2_fixture
 from voronoi_lab import stage_handlers
 from voronoi_lab.config import LabConfig
-from voronoi_lab.core import ArtifactStore, GateStatus, RunIndex, canonical_hash
+from voronoi_lab.core import (
+    ArtifactStore,
+    GateStatus,
+    RunIndex,
+    canonical_hash,
+    canonical_json_bytes,
+)
 from voronoi_lab.execution import ExecutionError, ExperimentRunner, StageContext
+from voronoi_lab.exp1.tracking2_vgg import load_tracking2_vgg_manifest
 from voronoi_lab.pipeline import (
     DEFAULT_STAGES,
     ImplementationStatus,
@@ -134,6 +142,84 @@ class _Dumpable(SimpleNamespace):
         return dict(self.payload)
 
 
+def _with_tracking2_vgg_fixture(config: LabConfig, tmp_path: Path) -> LabConfig:
+    project_root = Path(__file__).resolve().parents[1]
+    source_manifest = load_tracking2_vgg_manifest(
+        project_root / "configs/inputs/tracking2_vgg_seed0.yaml"
+    )
+    external_root = tmp_path / "vgg-external"
+
+    def replace_file(reference, raw: bytes):
+        destination = external_root / reference.path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(raw)
+        return reference.model_copy(
+            update={
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "size_bytes": len(raw),
+            }
+        )
+
+    architecture = source_manifest.architecture.model_copy(
+        update={
+            "source": replace_file(
+                source_manifest.architecture.source,
+                b"# inert hash-pinned VGG model fixture\n",
+            )
+        }
+    )
+    checkpoints = tuple(
+        replace_file(checkpoint, f"checkpoint epoch {checkpoint.epoch}\n".encode())
+        for checkpoint in source_manifest.checkpoints
+    )
+    datasets = source_manifest.datasets.model_copy(
+        update={
+            "train": replace_file(source_manifest.datasets.train, b"train fixture\n"),
+            "test": replace_file(source_manifest.datasets.test, b"test fixture\n"),
+        }
+    )
+    criticality = canonical_json_bytes(
+        {
+            "schema_version": 1,
+            "experiment": "vgg_checkpoint_training",
+            "config": {"training_only": True},
+            "training": [
+                {"epoch": epoch, "accuracy": index / 10}
+                for index, epoch in enumerate(config.experiment1.checkpoints)
+            ],
+        }
+    )
+    training_record = source_manifest.training_record.model_copy(
+        update={
+            "file": replace_file(source_manifest.training_record.file, criticality),
+        }
+    )
+    manifest = source_manifest.model_copy(
+        update={
+            "architecture": architecture,
+            "checkpoints": checkpoints,
+            "datasets": datasets,
+            "root": Path("vgg-external"),
+            "training_record": training_record,
+        }
+    )
+    manifest_path = tmp_path / "vgg-manifest.yaml"
+    manifest_path.write_text(
+        yaml.safe_dump(manifest.model_dump(mode="json"), sort_keys=False),
+        encoding="utf-8",
+    )
+    inputs = config.inputs.tracking2_vgg.model_copy(
+        update={
+            "manifest": Path("vgg-manifest.yaml"),
+            "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+            "root": Path("vgg-external"),
+        }
+    )
+    return config.model_copy(
+        update={"inputs": config.inputs.model_copy(update={"tracking2_vgg": inputs})}
+    )
+
+
 def test_inputs_handler_can_be_exercised_with_a_read_only_adapter_fixture(
     tmp_path, monkeypatch
 ) -> None:
@@ -220,6 +306,49 @@ def test_inputs_handler_can_be_exercised_with_a_read_only_adapter_fixture(
     relocated_context = _context(relocated_root, config, "inputs.tracking2")
     relocated_artifact = stage_handlers.handle_inputs_tracking2(relocated_context, {})
     assert relocated_artifact.artifact_id == reference_artifact.artifact_id
+
+
+def test_vgg_inputs_handler_snapshots_exploratory_criticality_metadata(tmp_path) -> None:
+    config = _with_tracking2_vgg_fixture(_small_config(), tmp_path)
+    manifest_path, adapter = stage_handlers.tracking2_vgg_adapter_from_config(config, tmp_path)
+    assert manifest_path == tmp_path / "vgg-manifest.yaml"
+    assert set(adapter.validate_all()) == {
+        "model_source",
+        "checkpoint_epoch0",
+        "checkpoint_epoch1",
+        "checkpoint_epoch5",
+        "checkpoint_epoch20",
+        "checkpoint_epoch100",
+        "dataset_train",
+        "dataset_test",
+        "training_record",
+    }
+
+    context = _context(tmp_path, config, "inputs.tracking2_vgg")
+    reference = stage_handlers.handle_inputs_tracking2_vgg(context, {})
+    payload = context.store.read_json(reference.artifact_id, "inputs.json")
+    assert payload["lineage_quality"] == "exploratory_legacy"
+    assert payload["training_record"]["experiment"] == "vgg_checkpoint_training"
+    assert {entry.path for entry in reference.manifest.files} == {
+        "inputs.json",
+        "manifest.yaml",
+        "criticality.json",
+    }
+    assert reference.manifest.metadata["criticality_experiment"] == "vgg_checkpoint_training"
+    assert reference.manifest.metadata["lineage_quality"] == "exploratory_legacy"
+    assert (
+        json.loads(context.store.read_bytes(reference.artifact_id, "criticality.json"))
+        == payload["training_record"]
+    )
+    assert (
+        validate_stage_output(
+            reference,
+            DEFAULT_STAGES.get("inputs.tracking2_vgg"),
+            context.store,
+            config=config,
+        )
+        is None
+    )
 
 
 def test_tracking2_boundary_rejects_checkpoint_and_bank_axis_mismatch(

@@ -72,6 +72,10 @@ class LinePlot(PayloadModel):
     series: tuple[LineSeries, ...]
     x_range: tuple[float, float]
     y_range: tuple[float, float]
+    x_reference: float | None = None
+    x_reference_label: str | None = None
+    y_reference: float | None = None
+    y_reference_label: str | None = None
     takeaway: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -84,6 +88,18 @@ class LinePlot(PayloadModel):
             raise ValueError("every line series must match the x-axis length")
         if self.x_range[0] >= self.x_range[1] or self.y_range[0] >= self.y_range[1]:
             raise ValueError("line plot ranges must be strictly increasing")
+        if (self.x_reference is None) != (self.x_reference_label is None):
+            raise ValueError("x reference value and label must be provided together")
+        if (self.y_reference is None) != (self.y_reference_label is None):
+            raise ValueError("y reference value and label must be provided together")
+        if self.x_reference is not None and not (
+            self.x_range[0] <= self.x_reference <= self.x_range[1]
+        ):
+            raise ValueError("x reference must lie inside x_range")
+        if self.y_reference is not None and not (
+            self.y_range[0] <= self.y_reference <= self.y_range[1]
+        ):
+            raise ValueError("y reference must lie inside y_range")
         return self
 
 
@@ -225,10 +241,38 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
     )
     distortion = np.clip(base_distortion + rng.normal(0.0, 0.006, base_distortion.shape), 0, 1)
 
+    epochs = np.array([0.0, 1.0, 5.0, 20.0, 100.0])
+    real_distortion = np.array([0.86, 0.81, 0.69, 0.52, 0.38])
+    global_null_distortion = np.array([0.85, 0.82, 0.78, 0.76, 0.74])
+    class_null_distortion = np.array([0.84, 0.80, 0.75, 0.72, 0.69])
+
+    boundary_coordinate = np.linspace(0.0, 2.0, 21)
+    empirical_boundary = 0.12 + 0.82 * np.exp(-(((boundary_coordinate - 1.0) / 0.16) ** 2))
+    off_cloud_boundary = 0.19 + 0.58 * np.exp(-(((boundary_coordinate - 1.04) / 0.25) ** 2))
+    shifted_boundary_null = np.full_like(boundary_coordinate, 0.25)
+
+    path_coordinate = np.linspace(0.0, 1.0, 21)
+    linear_support = 1.0 + 1.2 * np.sin(np.pi * path_coordinate) ** 2
+    spherical_support = 1.0 + 0.28 * np.sin(np.pi * path_coordinate) ** 2
+    graph_support = 1.0 + 0.12 * np.sin(np.pi * path_coordinate) ** 2
+
     alpha = np.array([0.0, 0.25, 0.5, 1.0])
     snap = np.clip(np.array([0.0, 0.012, 0.025, 0.055]) + rng.normal(0, 0.001, 4), 0, None)
     random_control = np.clip(np.array([0.0, 0.035, 0.09, 0.24]) + rng.normal(0, 0.002, 4), 0, None)
     away_control = np.clip(np.array([0.0, 0.055, 0.15, 0.39]) + rng.normal(0, 0.002, 4), 0, None)
+
+    boundary_fractions = np.array([0.5, 0.9, 1.1])
+    gain_sparse = np.array([0.62, 0.78, 0.91])
+    gain_coherent = np.array([0.72, 0.88, 1.04])
+    gain_off_cloud = np.array([0.96, 1.12, 1.29])
+    recovery_sparse = np.array([0.92, 0.83, 0.69])
+    recovery_coherent = np.array([0.87, 0.75, 0.58])
+    recovery_off_cloud = np.array([0.73, 0.54, 0.31])
+
+    blocks = np.arange(1.0, 9.0)
+    transplant_z = np.array([-0.8, -0.5, 0.1, 0.7, 1.1, 0.5, -0.2, -0.9])
+    boundary_z = np.array([0.6, 0.2, -0.3, -0.7, -0.8, -0.1, 0.5, 0.9])
+    contraction_z = np.array([0.7, 0.4, -0.1, -0.6, -0.9, -0.2, 0.4, 0.8])
 
     rho_values = np.array([0.0, 0.05, 0.2, 0.5])
     delta_values = np.array([0.0, 0.1, 0.5, 1.0])
@@ -244,15 +288,15 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
     experiments = (
         ExperimentSection(
             key="formation",
-            title="Do stable candidate cells emerge through training? — MOCKUP",
+            title="Experiment 1A-1C: formation and boundary alignment — MOCKUP",
             question=(
-                "Do held-out residual states become more compact, stable, and functionally aligned "
-                "with fitted cell boundaries as training proceeds?"
+                "Do held-out residual states become more compact than matched nulls, and does "
+                "functional sensitivity align with candidate-cell crossings on supported paths?"
             ),
             status="MOCKUP",
             status_detail=(
-                "Schematic values only; no checkpoint geometry or intervention output "
-                "is represented."
+                "Synthetic schematic values only; no checkpoint geometry, path, or intervention "
+                "output is represented."
             ),
             motivation=(
                 "A fitted Voronoi codebook is automatic. The scientific burden is to show held-out "
@@ -274,6 +318,8 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
                 "moment-matched nulls.",
                 "Resample images, never spatial tokens; keep plot scales fixed across "
                 "checkpoints and cuts.",
+                "Locate the first fitted crossing at r=1, compare with a within-path shifted-null, "
+                "and display path-support diagnostics beside response curves.",
             ),
             guide=InterpretationGuide(
                 supports=(
@@ -304,6 +350,112 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
                         "the real plot must include null comparisons before supporting a claim."
                     ),
                 ),
+                LinePlot(
+                    key="formation_nulls",
+                    title="Held-out distortion versus matched nulls at a sentinel cut — MOCKUP",
+                    x_label="checkpoint epoch",
+                    y_label="normalized distortion (lower is better)",
+                    x=_round(epochs),
+                    series=(
+                        LineSeries(
+                            name="real residual states",
+                            color_key="blue",
+                            dash="solid",
+                            y=_round(real_distortion),
+                        ),
+                        LineSeries(
+                            name="global Gaussian null",
+                            color_key="orange",
+                            dash="dash",
+                            y=_round(global_null_distortion),
+                        ),
+                        LineSeries(
+                            name="class-conditional Gaussian null",
+                            color_key="purple",
+                            dash="dot",
+                            y=_round(class_null_distortion),
+                        ),
+                    ),
+                    x_range=(0.0, 100.0),
+                    y_range=(0.25, 0.95),
+                    takeaway=(
+                        "MOCKUP reading: a growing late-training gap below both nulls would be "
+                        "necessary but not sufficient; stability and functional alignment must "
+                        "agree."
+                    ),
+                ),
+                LinePlot(
+                    key="boundary_alignment",
+                    title="Predictive sensitivity around the first fitted boundary — MOCKUP",
+                    x_label="boundary-normalized displacement r = s / s*",
+                    y_label="predictive sensitivity g_pred² (schematic units)",
+                    x=_round(boundary_coordinate),
+                    series=(
+                        LineSeries(
+                            name="empirical chord",
+                            color_key="blue",
+                            dash="solid",
+                            y=_round(empirical_boundary),
+                        ),
+                        LineSeries(
+                            name="off-cloud direction",
+                            color_key="vermillion",
+                            dash="dot",
+                            y=_round(off_cloud_boundary),
+                        ),
+                        LineSeries(
+                            name="within-path shifted-boundary null",
+                            color_key="black",
+                            dash="dash",
+                            y=_round(shifted_boundary_null),
+                        ),
+                    ),
+                    x_range=(0.0, 2.0),
+                    y_range=(0.0, 1.05),
+                    x_reference=1.0,
+                    x_reference_label="first fitted boundary",
+                    takeaway=(
+                        "MOCKUP reading: a narrow empirical-chord peak centered at r=1 and above "
+                        "the shifted null would support boundary alignment; off-cloud-only peaks "
+                        "would not."
+                    ),
+                ),
+                LinePlot(
+                    key="path_support",
+                    title="Path support diagnostic for matched endpoints — MOCKUP",
+                    x_label="normalized path arc length",
+                    y_label="nearest-neighbor distance / endpoint baseline",
+                    x=_round(path_coordinate),
+                    series=(
+                        LineSeries(
+                            name="linear chord",
+                            color_key="vermillion",
+                            dash="dot",
+                            y=_round(linear_support),
+                        ),
+                        LineSeries(
+                            name="radius-preserving path",
+                            color_key="orange",
+                            dash="dash",
+                            y=_round(spherical_support),
+                        ),
+                        LineSeries(
+                            name="neighbor-graph path",
+                            color_key="green",
+                            dash="solid",
+                            y=_round(graph_support),
+                        ),
+                    ),
+                    x_range=(0.0, 1.0),
+                    y_range=(0.8, 2.4),
+                    y_reference=1.0,
+                    y_reference_label="endpoint support baseline",
+                    takeaway=(
+                        "MOCKUP reading: boundary effects confined to the elevated red segment "
+                        "would "
+                        "indicate off-support fragility, not data-relevant discreteness."
+                    ),
+                ),
             ),
             takeaway=(
                 "No result yet. This panel specifies the held-out geometry comparison "
@@ -316,11 +468,11 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
         ),
         ExperimentSection(
             key="snapping",
-            title="Does centroid snapping preserve computation? — MOCKUP",
+            title="Experiment 1D-1E: snapping, recovery, and module comparison — MOCKUP",
             question=(
-                "Does moving a residual state toward its clean assigned centroid preserve "
-                "predictions better "
-                "than equal-norm control displacements?"
+                "Does centroid-directed motion preserve computation better than equal-norm "
+                "controls, "
+                "and do finite perturbations contract and recover downstream state?"
             ),
             status="MOCKUP",
             status_detail="Schematic dose-response curves only; the functional gate remains unrun.",
@@ -341,6 +493,8 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
                 "interventions at equal norm.",
                 "Use paired image bootstrap intervals and test both sparse-token and "
                 "spatially coherent support.",
+                "Keep the eight-block transplant comparison descriptive: no association sign is "
+                "preregistered, and one training seed cannot establish replication.",
             ),
             guide=InterpretationGuide(
                 supports=(
@@ -382,6 +536,110 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
                     takeaway=(
                         "MOCKUP reading: a lower solid blue curve would favor snapping "
                         "over norm-matched controls."
+                    ),
+                ),
+                LinePlot(
+                    key="finite_gain",
+                    title="Next-block RMS gain after finite perturbations — MOCKUP",
+                    x_label="perturbation / directional boundary distance",
+                    y_label="RMS gain κ",
+                    x=_round(boundary_fractions),
+                    series=(
+                        LineSeries(
+                            name="empirical chord · sparse token",
+                            color_key="blue",
+                            dash="solid",
+                            y=_round(gain_sparse),
+                        ),
+                        LineSeries(
+                            name="empirical chord · coherent support",
+                            color_key="sky",
+                            dash="dash",
+                            y=_round(gain_coherent),
+                        ),
+                        LineSeries(
+                            name="off-cloud · coherent support",
+                            color_key="vermillion",
+                            dash="dot",
+                            y=_round(gain_off_cloud),
+                        ),
+                    ),
+                    x_range=(0.45, 1.15),
+                    y_range=(0.4, 1.4),
+                    y_reference=1.0,
+                    y_reference_label="no contraction (κ = 1)",
+                    takeaway=(
+                        "MOCKUP reading: κ below one for both sparse and coherent empirical "
+                        "perturbations would be one required correction signature, not an "
+                        "attractor claim."
+                    ),
+                ),
+                LinePlot(
+                    key="cell_recovery",
+                    title="Recovery of the clean downstream cell — MOCKUP",
+                    x_label="perturbation / directional boundary distance",
+                    y_label="clean downstream-cell recovery probability",
+                    x=_round(boundary_fractions),
+                    series=(
+                        LineSeries(
+                            name="empirical chord · sparse token",
+                            color_key="blue",
+                            dash="solid",
+                            y=_round(recovery_sparse),
+                        ),
+                        LineSeries(
+                            name="empirical chord · coherent support",
+                            color_key="sky",
+                            dash="dash",
+                            y=_round(recovery_coherent),
+                        ),
+                        LineSeries(
+                            name="off-cloud · coherent support",
+                            color_key="vermillion",
+                            dash="dot",
+                            y=_round(recovery_off_cloud),
+                        ),
+                    ),
+                    x_range=(0.45, 1.15),
+                    y_range=(0.0, 1.0),
+                    takeaway=(
+                        "MOCKUP reading: preferential clean-cell recovery must accompany κ < 1; "
+                        "either signature alone is insufficient for the functional gate."
+                    ),
+                ),
+                LinePlot(
+                    key="module_comparison",
+                    title="Blockwise functional signatures beside transplant damage — MOCKUP",
+                    x_label="residual block",
+                    y_label="within-metric standardized score (descriptive)",
+                    x=_round(blocks),
+                    series=(
+                        LineSeries(
+                            name="transplant damage",
+                            color_key="black",
+                            dash="dash",
+                            y=_round(transplant_z),
+                        ),
+                        LineSeries(
+                            name="boundary enrichment",
+                            color_key="orange",
+                            dash="dot",
+                            y=_round(boundary_z),
+                        ),
+                        LineSeries(
+                            name="contraction strength",
+                            color_key="blue",
+                            dash="solid",
+                            y=_round(contraction_z),
+                        ),
+                    ),
+                    x_range=(1.0, 8.0),
+                    y_range=(-1.3, 1.3),
+                    y_reference=0.0,
+                    y_reference_label="within-metric mean",
+                    takeaway=(
+                        "MOCKUP reading: either association direction is scientifically live; with "
+                        "eight blocks and one seed, the real panel would remain descriptive."
                     ),
                 ),
             ),
@@ -544,9 +802,9 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
         mode="mockup",
         overview=OverviewPayload(
             question=(
-                "When, if ever, does continuous residual computation admit a stable "
-                "finite-state description "
-                "whose transitions have recoverable symmetries or product coordinates?"
+                "During ResNet training, do sitewise residual states form stable candidate cells "
+                "whose interiors suppress perturbations and whose crossings concentrate "
+                "sensitivity?"
             ),
             current_answer=(
                 "No empirical answer yet. This MOCKUP encodes the gated evidence "
@@ -555,23 +813,28 @@ def make_mock_payload(seed: int = 20260816) -> ReportPayload:
             ),
             status="MOCKUP",
             central_equation=(
-                r"\text{held-out cells}\;\land\;\text{functional fidelity}\;\land\;"
-                r"\text{synthetic recovery}\;\Longrightarrow\;\text{real algebra screen}"
+                r"\begin{aligned}"
+                r"&\text{null-relative geometry}\;\land\;\text{boundary alignment}\\"
+                r"&\land\;\text{snapping advantage}\;\land\;\kappa<1"
+                r"\;\Longrightarrow\;\text{candidate finite-state sufficiency}"
+                r"\end{aligned}"
             ),
             equation_where=(
-                "Each conjunction is a gate: later algebraic interpretation is blocked "
-                "when an earlier validation fails."
+                "Every conjunction is required. Passing only one diagnostic narrows the claim "
+                "rather "
+                "than establishing discrete computation."
             ),
             experiment_map=(
-                "Formation: held-out geometry and boundary alignment",
-                "Snapping/recovery: causal sufficiency against matched controls",
-                "Synthetic recovery: known-factor and symmetry validation",
-                "Conditional real algebra: null-calibrated held-out structure",
+                "Experiment 1A: held-out formation geometry versus matched nulls",
+                "Experiment 1B-1C: boundary response plus path-support diagnostics",
+                "Experiment 1D: snapping, contraction, and clean-cell recovery",
+                "Experiment 1E: descriptive module-transplant comparison",
             ),
             caveats=(
                 "A fitted Voronoi partition is a definition, not evidence for discrete "
                 "computation.",
-                "Factorization and commutant symmetry are parallel, non-equivalent tests.",
+                "Sharpness only in off-cloud or unsupported path segments indicates fragility, not "
+                "data-relevant cell boundaries.",
                 "Every schematic trace is watermarked and uses the same schema intended "
                 "for measured data.",
             ),

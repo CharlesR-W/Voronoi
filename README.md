@@ -1,11 +1,13 @@
 # Voronoi Residual Computation Lab
 
-> **Status: infrastructure and bounded validation implemented; scientific
-> phenomenon runs remain unrun.** The repository now contains a strict stage
-> DAG, immutable artifacts and run receipts, a hash-pinned Tracking2 adapter,
-> deterministic probe banks, mechanical checks, a tiny exact synthetic subgate,
-> and a self-contained `MOCKUP` report. These implementation validations are not
-> evidence that residual candidate cells form, snap, recover, or factor.
+> **Status: Experiment 1 activation-geometry collection implemented and one local
+> exploratory pilot integrity-verified; candidate-cell phenomenon gates remain
+> unrun.** The repository now contains a strict stage DAG, immutable artifacts and
+> receipts, hash-pinned ResNet/VGG checkpoint adapters, a trained synthetic residual
+> task, real/fake response and Jacobian fields, synchronized checkpoint GIFs,
+> mechanical checks, a tiny exact synthetic subgate, and a self-contained `MOCKUP`
+> report. The measured pilot is not evidence that residual candidate cells form,
+> snap, recover, or factor.
 
 This project asks whether continuous residual computation admits a useful
 finite-state description and, if it does, whether the resulting transition
@@ -28,29 +30,41 @@ uv sync --all-extras
 ```
 
 The currently runnable scientific-validation targets are
-`gate.mechanical` and `gate.synthetic_exact`; `report.build` creates only the
+`gate.mechanical` and `gate.synthetic_exact`. The exploratory Experiment 1 collection
+targets `exp1.synthetic_task`, `exp1.plateau.synthetic`, `exp1.plateau.cifar`, and
+`exp1.plateau.animations` are also runnable; `report.build` still creates only the
 visibly watermarked schematic. Every successful `run` publishes an immutable,
 database-independent receipt and prints its artifact ID. For example:
 
 ```bash
 .venv/bin/voronoi-lab run --until gate.mechanical --json
 .venv/bin/voronoi-lab run --until gate.synthetic_exact --json
+.venv/bin/voronoi-lab run --until exp1.plateau.animations --json
 .venv/bin/voronoi-lab run --stage report.build --json
 ```
 
-The next scientific prerequisite is still to identify and archive the primary
-papers behind the motivating “activation plateau” and sharp-boundary reports.
-That audit must finish before the project freezes a literature-matched plateau
-definition or makes any replication claim.
+The motivating activation-plateau request was traced to several distinct methods,
+not one published estimand. The source audit, exact code revisions, official paper
+links, and local audit-copy hashes are recorded in
+[`references/activation-plateau-source-audit.md`](references/activation-plateau-source-audit.md).
+The first CNN collection keeps source analogues separate from explicitly new hybrid
+Jacobians and makes no exact-replication claim.
 
 Current inputs are local-only and are **not clone-safe**:
 
 - the ResNet definition, configuration, checkpoints, and transplant artifact
   are in the sibling `../Experiments/Tracking2/` project; their presence was
-  verified locally on 2026-08-16, but they are not vendored here; and
-- the two mathematical design notes are archived under `references/notes/`
+  verified locally on 2026-08-16, but they are not vendored here;
+- the VGG-19+BN definition and five seed-0 checkpoints are also hash-pinned in
+  that sibling project under an explicitly weaker `exploratory_legacy` lineage;
+- and the two mathematical design notes are archived under `references/notes/`
   with hashes listed in `references/README.md`; they are proposals, not
   empirical sources.
+
+The canonical local pilot, raw array inventory, and animation links are in
+[`RESULTS.md`](RESULTS.md) and
+[`artifacts/EXPERIMENT_1_DATA.md`](artifacts/EXPERIMENT_1_DATA.md). Current project
+state is summarized in [`STATUS.md`](STATUS.md).
 
 The infrastructure boundary is deliberate. Runnable stages use strict,
 versioned payload schemas, semantic seed namespaces, content-addressed objects,
@@ -310,6 +324,57 @@ interiors and response concentrated near crossings. If sharpness appears only
 in off-cloud directions, the conservative interpretation is off-support
 fragility rather than data-relevant discrete computation. The hard quantizer's
 own discontinuity is never counted as evidence about the network Jacobian.
+
+#### Exploratory path geometry and embedding diagnostics
+
+The empirical chord is convenient, but it may pass through activation-space
+regions that are atypical even when both endpoints are observed states. This is
+especially plausible for high-dimensional distributions concentrated in a thin
+radial shell: a Euclidean chord can move inward through a low-density region.
+That concentration-of-measure concern does not by itself establish that the
+activations lie on a smooth manifold, or that any proposed alternative remains
+on one.
+
+Before interpreting a plateau measurement, repeat it with the same endpoint
+pairs under several declared path constructions:
+
+- the current linear chord;
+- a centered, radius-preserving spherical interpolation;
+- a piecewise-linear path through a held-out local-neighbor graph; and
+- if a separately validated activation generative model becomes available, a
+  path constrained by that model.
+
+Spherical interpolation controls the radial-shell failure mode but is not an
+on-manifold guarantee. A neighbor-graph path stays close to observed states by
+construction but changes path length and direction and can introduce corners.
+Compare schemes at matched endpoint pairs and normalized arc length, and report
+pathwise nearest-neighbor distance, local-density score, activation norm,
+suffix predictive entropy, and the number and location of fitted-cell
+crossings. The plateau conclusion is robust only if the qualitative
+interior-versus-boundary contrast survives among paths with support diagnostics
+comparable to observed activations. Strong effects confined to unsupported
+segments are evidence about off-support behavior, not meaningful interpolation
+between data states.
+
+As a descriptive visualization, construct two precomputed-distance embeddings
+for a fixed held-out probe bank at each selected checkpoint and cut. The first
+uses pairwise cosine distance between standardized activations. The second uses
+a symmetrized path cost obtained by integrating, or discretely averaging, a
+declared next-block or suffix Jacobian response along the chosen interpolation
+path. This Jacobian-derived cost must be named precisely and checked for
+nonnegativity, symmetry, and triangle-inequality violations rather than assumed
+to be a metric. For a small image substrate such as MNIST, the probe bank could
+include every test digit; for the present CIFAR-10 substrate it should use the
+fixed held-out bank and may color points by class only as a diagnostic.
+
+Fit one aligned layout per distance definition across all checkpoints, keep the
+point identities and camera fixed, and animate the two layouts side by side.
+Coordinates are comparable through time within a panel, but not geometrically
+across the cosine and Jacobian panels. Accompany the animation with the complete
+distance or similarity matrices as checkpoint heatmaps using one fixed sample
+order and color scale. Quantitative conclusions must come from the original
+high-dimensional distances and their association with cells, labels, margins,
+and training time, not from apparent clusters in UMAP.
 
 ### 1C. On-data and off-data perturbations
 
@@ -805,17 +870,26 @@ Planned views are:
    fixed across frames; per-frame embeddings are prohibited because their
    motion can manufacture apparent formation. Any two-dimensional Voronoi
    overlay is labeled as a projection, not the measured high-dimensional cell.
-4. **Snapping and recovery.** Dose-response curves for $\alpha$, separated from
+4. **Paired distance animation and matrices.** Fixed-layout UMAP views of the
+   same probe states under cosine distance and the declared path-integrated
+   Jacobian cost, synchronized through training. Beside them, show the full
+   distance or similarity heatmaps with fixed sample ordering and color scale.
+   The panels are descriptive and their two-dimensional coordinates are not
+   treated as directly comparable across distance definitions.
+5. **Interpolation sensitivity.** Plateau and boundary-response curves under
+   linear, radius-preserving, and neighbor-graph paths, paired with path-support
+   diagnostics so off-support segments remain visible.
+6. **Snapping and recovery.** Dose-response curves for $\alpha$, separated from
    equal-norm controls, plus clean-versus-perturbed trajectories through depth.
-5. **Module comparison.** Transplant damage beside contraction and boundary
+7. **Module comparison.** Transplant damage beside contraction and boundary
    measurements, labeled descriptive until independently replicated.
-6. **Synthetic recovery.** Planted versus recovered product coordinates,
+8. **Synthetic recovery.** Planted versus recovered product coordinates,
    interaction-order spectra, commutator spectra, held-out reconstruction, and
    recovery curves across $(\rho,\delta,\text{sample count})$.
-7. **Conditional real algebra.** Only after both gates pass: low-commutator or
+9. **Conditional real algebra.** Only after both gates pass: low-commutator or
    intertwiner spectra, factor-coordinate compression, null comparisons, and
    stability.
-8. **Provenance and negative results.** Configurations, hashes, probe banks,
+10. **Provenance and negative results.** Configurations, hashes, probe banks,
    metrics, $K$, occupancy, seeds, uncertainty units, nulls, failed gates, and
    explicit non-claims.
 
@@ -842,10 +916,11 @@ their held-out or confirmatory data are inspected.
 
 The minimum program is:
 
-1. Audit the motivating literature and pin down exactly what its authors call
-   an activation plateau or residual boundary. Primary-source PDFs should be
-   stored locally before any replication claim.
-2. Run the mechanical and five-checkpoint ResNet gates.
+1. Preserve the completed motivating-literature audit and keep its distinct response,
+   RGB stable-region, and Jacobian estimands separate.
+2. Use the completed small-model activation-geometry collection to choose and freeze a
+   quantitative plateau statistic; then run the mechanical and five-checkpoint ResNet
+   candidate-cell gates.
 3. Run snapping and recovery only if the candidate cells have held-out and
    functional support.
 4. In parallel, validate symmetry and factor recovery on the known synthetic
@@ -869,22 +944,23 @@ Stop or narrow the language at each failure:
 
 ## Implemented scope and unresolved choices
 
-The implementation currently stops at infrastructure, input/probe
-materialization, bounded Experiment 1 mechanics, and the tiny-state exact
-Experiment 2 subgate. It does **not** run the five-checkpoint formation analysis,
-the coarse or functional phenomenon gates, confirmation training, sampled
-synthetic recovery, or real algebra. Those stages remain visible in the DAG as
-`PLANNED`, with typed configuration placeholders where choices are sufficiently
-specified. `protocol.mode: confirmatory` is rejected until a future schema can
-bind it to a preregistered full-protocol hash.
+The implementation now includes infrastructure, input/probe materialization, bounded
+Experiment 1 mechanics, a five-checkpoint synthetic/CIFAR activation-geometry
+collection, its synchronized animations, and the tiny-state exact Experiment 2
+subgate. It does **not** run the candidate-cell formation analysis, the coarse or
+functional phenomenon gates, confirmation training, sampled synthetic recovery, or
+real algebra. Those stages remain visible in the DAG as `PLANNED`, with typed
+configuration placeholders where choices are sufficiently specified.
+`protocol.mode: confirmatory` is rejected until a future schema can bind it to a
+preregistered full-protocol hash.
 
 Several author choices remain consequential, although the exploratory pilot
 configuration uses explicit provisional defaults so infrastructure work can
 proceed:
 
-- “activation plateau” may refer in the motivating literature to a different
-  object than sitewise residual states; the exact papers and definition still
-  need to be pinned down;
+- the audited literature uses several different operationalizations of activation
+  plateaus and stable regions, so a future powered run still needs one preregistered
+  primary statistic and null;
 - “on/off dataset perturbations” is currently interpreted as input-derived
   states versus direct, norm-matched residual interventions; and
 - the real transition analysis currently assumes layer-specific codebooks and
@@ -892,17 +968,19 @@ proceed:
 
 ## Source status
 
-This write-up was developed from the project description and two local notes,
-read in full and archived here:
+This write-up was developed from the project description, two local notes, and the
+activation-plateau source audit, all read in full and archived or linked here:
 
 - [`references/notes/approximate-symmetry-operator-algebra.md`](references/notes/approximate-symmetry-operator-algebra.md)
 - [`references/notes/approximate-factorization-voronoi-residual.md`](references/notes/approximate-factorization-voronoi-residual.md)
+- [`references/activation-plateau-source-audit.md`](references/activation-plateau-source-audit.md)
 
-Those notes provide mathematical proposals, not empirical findings. The
-motivating plateau/boundary literature has not yet been audited in this
-repository, so this README deliberately makes no citation-dependent literature
-claims.
+The mathematical notes provide proposals, not empirical findings. The source audit
+separates the Heimersheim--Mendel real/fake response curves, the SAE study of four
+activation types, the Janiak et al. three-anchor RGB construction, and the
+Shinkle--Heimersheim Jacobian work. The local CNN Jacobian surfaces and checkpoint-time
+GIFs are labeled as new hybrid diagnostics rather than source replications.
 
 Initial specification drafted collaboratively by CRW and Codex on 2026-08-16;
-the infrastructure implementation and status audit were completed on
-2026-08-17.
+the infrastructure implementation, source audit, and first Experiment 1 collection
+pilot were completed on 2026-08-17.

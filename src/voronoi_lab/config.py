@@ -17,6 +17,7 @@ StrictFloat = Annotated[float, Field(strict=True)]
 NonNegativeFloat = Annotated[float, Field(ge=0, strict=True)]
 StrictBoolean = Annotated[bool, Field(strict=True)]
 VersionOne = Annotated[int, Field(ge=1, le=1, strict=True)]
+VersionTwo = Annotated[int, Field(ge=2, le=2, strict=True)]
 
 
 def _require_true(value: bool) -> bool:
@@ -52,9 +53,10 @@ class ProtocolConfig(StrictModel):
 
 
 class RuntimeConfig(StrictModel):
-    # Every currently runnable numerical stage is deliberately CPU-only. Future
-    # accelerator stages must add a resolved backend contract before widening this.
-    device: Literal["cpu"] = "cpu"
+    # Device selection is honored only by stages that sign ``runtime.device``
+    # into their config and implement an explicit backend contract. At present,
+    # that is limited to ``exp1.plateau.cifar``; other stages remain CPU-bound.
+    device: Literal["cpu", "cuda"] = "cpu"
     dtype: Literal["float32", "float64"] = "float32"
     workers: Annotated[int, Field(ge=0, le=64, strict=True)] = 0
     deterministic: StrictTrue = True
@@ -74,8 +76,21 @@ class Tracking2Inputs(StrictModel):
     read_only: StrictTrue = True
 
 
+class Tracking2VGGInputs(StrictModel):
+    """Hash-pinned legacy VGG trajectory used as a non-residual control."""
+
+    manifest: Path = Path("configs/inputs/tracking2_vgg_seed0.yaml")
+    manifest_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", strict=True)] = (
+        "7da25515b508343aecddebc6e26ea0548f35c158c88b399ccb36803e8b803ebd"
+    )
+    root: Path = Path("../Experiments/Tracking2")
+    expected_model: str = "vgg19_bn_classifier512_width1"
+    read_only: StrictTrue = True
+
+
 class InputsConfig(StrictModel):
     tracking2: Tracking2Inputs = Field(default_factory=Tracking2Inputs)
+    tracking2_vgg: Tracking2VGGInputs = Field(default_factory=Tracking2VGGInputs)
 
 
 class ProbeBanksConfig(StrictModel):
@@ -371,6 +386,92 @@ class MechanicalProtocolConfig(StrictModel):
         return self
 
 
+class SyntheticPlateauTaskConfig(StrictModel):
+    """Small known-data task for following residual geometry through training."""
+
+    protocol_version: VersionOne = 1
+    task: Literal["three_class_gaussian_mixture"] = "three_class_gaussian_mixture"
+    architecture: Literal["normalization_free_residual_mlp"] = "normalization_free_residual_mlp"
+    input_dimensions: Annotated[int, Field(ge=2, le=2, strict=True)] = 2
+    classes: Annotated[int, Field(ge=3, le=3, strict=True)] = 3
+    train_samples_per_class: PositiveInt = 256
+    test_samples_per_class: PositiveInt = 128
+    class_radius: Annotated[float, Field(gt=0, strict=True)] = 3.0
+    noise_standard_deviation: Annotated[float, Field(gt=0, strict=True)] = 0.55
+    hidden_width: PositiveInt = 32
+    residual_blocks: PositiveInt = 4
+    intervention_block: NonNegativeInt = 1
+    epochs: PositiveInt = 100
+    batch_size: PositiveInt = 64
+    optimizer: Literal["sgd"] = "sgd"
+    learning_rate: Annotated[float, Field(gt=0, strict=True)] = 0.05
+    momentum: Annotated[float, Field(ge=0, lt=1, strict=True)] = 0.9
+    weight_decay: NonNegativeFloat = 0.0
+
+    @model_validator(mode="after")
+    def validate_synthetic_task(self) -> SyntheticPlateauTaskConfig:
+        if self.intervention_block >= self.residual_blocks:
+            raise ValueError("synthetic intervention_block must select a residual block")
+        return self
+
+
+class PlateauProtocolConfig(StrictModel):
+    """Bounded, source-separated activation-plateau collection protocol."""
+
+    protocol_version: VersionTwo = 2
+    status: Literal["exploratory_hybrid"] = "exploratory_hybrid"
+    resnet_cut: Literal["stage2.block1"] = "stage2.block1"
+    vgg_cut: Literal["stage2.conv1"] = "stage2.conv1"
+    spatial_site: Literal["center"] = "center"
+    covariance_fit_images: PositiveInt = 256
+    centers_per_kind: PositiveInt = 4
+    fake_distribution: Literal["empirical_covariance_gaussian"] = "empirical_covariance_gaussian"
+    perturbation_directions_per_center: PositiveInt = 8
+    perturbation_steps: PositiveInt = 37
+    perturbation_max_scale: Annotated[float, Field(gt=0, strict=True)] = 1.0
+    local_surface_grid_points: PositiveInt = 17
+    local_surface_extent: Annotated[float, Field(gt=0, strict=True)] = 0.75
+    three_anchor_count: Annotated[int, Field(ge=3, le=3, strict=True)] = 3
+    three_anchor_grid_points: PositiveInt = 21
+    three_anchor_axis_min: StrictFloat = -0.25
+    three_anchor_axis_max: StrictFloat = 1.25
+    distance_readout: Literal["logits_l2_and_kl"] = "logits_l2_and_kl"
+    plane_jacobian_fields: Literal["raw_transition_and_residual_update"] = (
+        "raw_transition_and_residual_update"
+    )
+    animation_jacobian_selection: Literal[
+        "residual_update_for_residual_raw_transition_for_nonresidual"
+    ] = "residual_update_for_residual_raw_transition_for_nonresidual"
+    center_jacobian_estimator: Literal["hutchinson_next_transition"] = "hutchinson_next_transition"
+    hutchinson_probes: PositiveInt = 8
+    intervention_batch_size: PositiveInt = 64
+    global_animation_scales: StrictTrue = True
+    orientation_frame_ms: PositiveInt = 3000
+    intermediate_frame_ms: PositiveInt = 1000
+    final_frame_ms: PositiveInt = 6000
+
+    @model_validator(mode="after")
+    def validate_plateau_protocol(self) -> PlateauProtocolConfig:
+        for name, value in (
+            ("local_surface_grid_points", self.local_surface_grid_points),
+            ("three_anchor_grid_points", self.three_anchor_grid_points),
+        ):
+            if value < 3 or value % 2 == 0:
+                raise ValueError(f"{name} must be an odd integer at least 3")
+        if self.perturbation_steps < 3:
+            raise ValueError("perturbation_steps must be at least 3")
+        if self.three_anchor_axis_min >= self.three_anchor_axis_max:
+            raise ValueError("three-anchor axis minimum must be less than maximum")
+        for name, value in (
+            ("orientation_frame_ms", self.orientation_frame_ms),
+            ("intermediate_frame_ms", self.intermediate_frame_ms),
+            ("final_frame_ms", self.final_frame_ms),
+        ):
+            if value % 10:
+                raise ValueError(f"{name} must be divisible by 10 for exact GIF timing")
+        return self
+
+
 class Experiment1Config(StrictModel):
     checkpoints: tuple[NonNegativeInt, ...] = (0, 1, 5, 20, 100)
     cuts: tuple[Experiment1Cut, ...] = (
@@ -394,6 +495,10 @@ class Experiment1Config(StrictModel):
         default_factory=ConfirmationTrainingConfig
     )
     mechanical_protocol: MechanicalProtocolConfig = Field(default_factory=MechanicalProtocolConfig)
+    synthetic_plateau_task: SyntheticPlateauTaskConfig = Field(
+        default_factory=SyntheticPlateauTaskConfig
+    )
+    plateau_protocol: PlateauProtocolConfig = Field(default_factory=PlateauProtocolConfig)
     probe_banks: ProbeBanksConfig = Field(default_factory=ProbeBanksConfig)
     state_metric: StateMetricConfig = Field(default_factory=StateMetricConfig)
     codebooks: CodebookConfig = Field(default_factory=CodebookConfig)
@@ -676,6 +781,14 @@ class LabConfig(StrictModel):
             raise ValueError(
                 "confirmation training seeds must equal gates.confirmation.training_seeds"
             )
+        plateau = self.experiment1.plateau_protocol
+        synthetic_task = self.experiment1.synthetic_plateau_task
+        if synthetic_task.epochs != self.experiment1.checkpoints[-1]:
+            raise ValueError("synthetic task epochs must equal the final Experiment 1 checkpoint")
+        if 3 * synthetic_task.train_samples_per_class < plateau.covariance_fit_images:
+            raise ValueError("synthetic training split is too small for the covariance bank")
+        if 3 * synthetic_task.test_samples_per_class < plateau.centers_per_kind:
+            raise ValueError("synthetic test split is too small for the declared centers")
         if self.gates.coarse.require_nonfinal_cut and not any(
             cut != "stage4.block2" for cut in self.experiment1.sentinel_cuts
         ):

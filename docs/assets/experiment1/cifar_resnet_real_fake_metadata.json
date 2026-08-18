@@ -1,0 +1,173 @@
+{
+  "animation_kind": "real_fake_scalar_fields",
+  "canvas": {
+    "height": 900,
+    "width": 1440
+  },
+  "checkpoint_panels_synchronized": true,
+  "estimands": {
+    "curve": "center-and-direction median downstream-logit L2 from path base",
+    "heatmap": "2D-plane-restricted ||D(T-I)||_F"
+  },
+  "files": {
+    "final_png": "cifar_resnet_real_fake_final.png",
+    "gif": "cifar_resnet_real_fake.gif",
+    "metadata": "cifar_resnet_real_fake_metadata.json"
+  },
+  "gif_badge": true,
+  "input_checkpoint_count": 5,
+  "input_checkpoints": [
+    "epoch 0",
+    "epoch 1",
+    "epoch 5",
+    "epoch 20",
+    "epoch 100"
+  ],
+  "labels": {
+    "curve": "Logit L2",
+    "final_callout": "Final checkpoint \u2192 compare real and matched-fake geometry. This is a descriptive diagnostic, not a phenomenon gate or causal residual claim.",
+    "heatmap_classification": "NEW HYBRID",
+    "scalar": "2D \u2016D(T-I)\u2016F",
+    "title": "CIFAR ResNet: real vs fake"
+  },
+  "layout_fixed_across_frames": true,
+  "presentation_hold_frame_count": 1,
+  "rendered_frame_count": 6,
+  "rendered_frames": [
+    {
+      "checkpoint": "epoch 0",
+      "duration_ms": 3000,
+      "index": 0,
+      "role": "orientation"
+    },
+    {
+      "checkpoint": "epoch 1",
+      "duration_ms": 1000,
+      "index": 1,
+      "role": "checkpoint"
+    },
+    {
+      "checkpoint": "epoch 5",
+      "duration_ms": 1000,
+      "index": 2,
+      "role": "checkpoint"
+    },
+    {
+      "checkpoint": "epoch 20",
+      "duration_ms": 1000,
+      "index": 3,
+      "role": "checkpoint"
+    },
+    {
+      "checkpoint": "epoch 100",
+      "duration_ms": 1000,
+      "index": 4,
+      "role": "checkpoint"
+    },
+    {
+      "checkpoint": "epoch 100",
+      "duration_ms": 6000,
+      "index": 5,
+      "role": "conclusion"
+    }
+  ],
+  "rendering": {
+    "engine": "Pillow",
+    "font_bold": {
+      "family": "DejaVu Sans",
+      "file": "DejaVuSans-Bold.ttf",
+      "sha256": "b5d64817b6331723b5e59eaaa6db90057cbed58e9733f65687f110638192359f",
+      "style": "Bold"
+    },
+    "font_regular": {
+      "family": "DejaVu Sans",
+      "file": "DejaVuSans.ttf",
+      "sha256": "6038a160b491e121c1f12c7bccb4a9c8730296e3adc1086a059404ed84b7451c",
+      "style": "Book"
+    },
+    "gif_quantization": {
+      "colors": 256,
+      "dither": "none",
+      "method": "median_cut"
+    },
+    "pillow_version": "11.3.0"
+  },
+  "scales": {
+    "array_coordinate_contract": "row_zero_is_minimum_y",
+    "curve_x": {
+      "clips_data": false,
+      "data_max": 1.0,
+      "data_min": 0.0,
+      "display_max": 1.05,
+      "display_min": -0.05,
+      "source": "computed_global_with_padding"
+    },
+    "curve_y": {
+      "clips_data": false,
+      "data_max": 1.9348654747009277,
+      "data_min": 3.7080707215864095e-07,
+      "display_max": 2.031608748435974,
+      "display_min": -0.09674327373504639,
+      "source": "computed_global_with_padding"
+    },
+    "heatmap": {
+      "clips_data": false,
+      "data_max": 0.5193195343017578,
+      "data_min": 0.13316550850868225,
+      "display_max": 0.5193195343017578,
+      "display_min": 0.13316550850868225,
+      "source": "computed_global"
+    },
+    "heatmap_extent": [
+      -0.75,
+      0.75,
+      -0.75,
+      0.75
+    ],
+    "heatmap_x": [
+      -0.75,
+      -0.65625,
+      -0.5625,
+      -0.46875,
+      -0.375,
+      -0.28125,
+      -0.1875,
+      -0.09375,
+      0.0,
+      0.09375,
+      0.1875,
+      0.28125,
+      0.375,
+      0.46875,
+      0.5625,
+      0.65625,
+      0.75
+    ],
+    "heatmap_y": [
+      -0.75,
+      -0.65625,
+      -0.5625,
+      -0.46875,
+      -0.375,
+      -0.28125,
+      -0.1875,
+      -0.09375,
+      0.0,
+      0.09375,
+      0.1875,
+      0.28125,
+      0.375,
+      0.46875,
+      0.5625,
+      0.65625,
+      0.75
+    ]
+  },
+  "schema_version": 2,
+  "timing": {
+    "checkpoint_ms": 1000,
+    "conclusion_ms": 6000,
+    "loop": 0,
+    "orientation_ms": 3000
+  }
+}

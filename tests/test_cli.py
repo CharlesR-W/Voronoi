@@ -175,22 +175,47 @@ def test_validate_inputs_uses_the_same_strict_adapter_boundary(
 ) -> None:
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text("fixture: true\n")
+    vgg_manifest = tmp_path / "vgg-manifest.yaml"
+    vgg_manifest.write_text("fixture: vgg\n")
     adapter = SimpleNamespace(
         root=tmp_path / "external",
         validate_all=lambda: {"model_source": tmp_path / "models.py"},
         transplant_rows=lambda: (object(), object()),
     )
-    calls = []
+    vgg_adapter = SimpleNamespace(
+        root=tmp_path / "vgg-external",
+        manifest=SimpleNamespace(lineage_quality="exploratory_legacy"),
+        validate_all=lambda: {
+            "model_source": tmp_path / "models.py",
+            "training_record": tmp_path / "criticality.json",
+        },
+        read_training_record=lambda: {
+            "schema_version": 1,
+            "experiment": "vgg_checkpoint_training",
+        },
+    )
+    calls: list[tuple[str, int, Path]] = []
 
     def adapter_from_config(config, root):
-        calls.append((config.schema_version, root))
+        calls.append(("resnet", config.schema_version, root))
         return manifest, adapter
 
+    def vgg_adapter_from_config(config, root):
+        calls.append(("vgg", config.schema_version, root))
+        return vgg_manifest, vgg_adapter
+
     monkeypatch.setattr(cli, "tracking2_adapter_from_config", adapter_from_config)
+    monkeypatch.setattr(cli, "tracking2_vgg_adapter_from_config", vgg_adapter_from_config)
     assert cli.main(["validate", "--inputs", "--json"]) == 0
     result = json.loads(capsys.readouterr().out)
-    assert calls and calls[0][0] == 1
+    assert [call[0] for call in calls] == ["resnet", "vgg"]
+    assert all(call[1] == 1 for call in calls)
     assert result["tracking2"]["transplant_rows"] == 2
+    assert result["tracking2_vgg"]["lineage_quality"] == "exploratory_legacy"
+    assert set(result["tracking2_vgg"]["validated_files"]) == {
+        "model_source",
+        "training_record",
+    }
 
 
 def test_run_requires_a_target_and_gate_failure_has_strict_exit(monkeypatch, capsys) -> None:

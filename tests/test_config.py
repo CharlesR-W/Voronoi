@@ -14,6 +14,15 @@ def test_checked_in_pilot_config_is_complete_and_stable() -> None:
     assert config.experiment1.checkpoints == (0, 1, 5, 20, 100)
     assert len(config.experiment1.cuts) == 8
     assert config.experiment1.bootstrap.unit == "image"
+    assert config.inputs.tracking2_vgg.expected_model == "vgg19_bn_classifier512_width1"
+    assert config.experiment1.plateau_protocol.resnet_cut == "stage2.block1"
+    assert config.experiment1.plateau_protocol.vgg_cut == "stage2.conv1"
+    assert config.experiment1.plateau_protocol.protocol_version == 2
+    assert (
+        config.experiment1.plateau_protocol.animation_jacobian_selection
+        == "residual_update_for_residual_raw_transition_for_nonresidual"
+    )
+    assert config.experiment1.synthetic_plateau_task.residual_blocks == 4
     assert config.experiment2.oracle_factor_sizes == (2, 3)
     assert config.experiment2.exact_protocol.generator_rate_shape == 2.0
     assert (
@@ -154,6 +163,16 @@ def test_exact_protocol_rejects_unsupported_generator_and_search_choices(
         )
 
 
+def test_cuda_is_an_explicit_supported_runtime_device() -> None:
+    config = LabConfig.model_validate(
+        {
+            "schema_version": 1,
+            "runtime": {"device": "cuda"},
+        }
+    )
+    assert config.runtime.device == "cuda"
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -169,10 +188,14 @@ def test_exact_protocol_rejects_unsupported_generator_and_search_choices(
         {"runtime": {"workers": 65}},
         {"runtime": {"deterministic": "false"}},
         {"runtime": {"deterministic": False}},
-        {"runtime": {"device": "cuda"}},
         {"runtime": {"device": "auto"}},
         {"inputs": {"tracking2": {"read_only": 1}}},
         {"inputs": {"tracking2": {"manifest_sha256": "not-a-digest"}}},
+        {"inputs": {"tracking2_vgg": {"read_only": False}}},
+        {"experiment1": {"plateau_protocol": {"local_surface_grid_points": 8}}},
+        {"experiment1": {"plateau_protocol": {"three_anchor_axis_min": 2.0}}},
+        {"experiment1": {"plateau_protocol": {"orientation_frame_ms": 1001}}},
+        {"experiment1": {"synthetic_plateau_task": {"intervention_block": 4}}},
         {"experiment1": {"mechanical_protocol": {"protocol_version": True}}},
         {"experiment1": {"mechanical_protocol": {"input_batch_size": True}}},
         {"experiment2": {"exact_protocol": {"random_relabel": 1}}},

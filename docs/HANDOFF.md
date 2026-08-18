@@ -1,187 +1,134 @@
-# Implementation handoff
+# Experiment 1 continuation handoff
 
-Last updated: 2026-08-17 (US/Pacific)
+Last updated: 2026-08-18 (US/Pacific)
 
-## Scientific status
+## Read order
 
-The infrastructure-first milestone is implemented. Two bounded validation
-targets are runnable:
+1. [`../STATUS.md`](../STATUS.md) -- current milestone and claim boundary.
+2. [`../RESULTS.md`](../RESULTS.md) -- measured pilot and animation links.
+3. [`../artifacts/EXPERIMENT_1_DATA.md`](../artifacts/EXPERIMENT_1_DATA.md) -- exact
+   artifact IDs, child shards, arrays, and verification commands.
+4. [`../references/activation-plateau-source-audit.md`](../references/activation-plateau-source-audit.md)
+   -- which requested element came from which source.
+5. Relevant Experiment 1 sections in [`../README.md`](../README.md) for the broader
+   candidate-cell gates that remain planned.
 
-- `gate.mechanical`: seeded bank materialization, distinct hash-pinned
-  train/test source files, geometry round trips, exact split-model identity,
-  per-cut JVP checks, and synthetic generator/twirl invariants on the pinned
-  seed-0 substrate. This is not yet a row-level dataset-overlap audit.
-- `gate.synthetic_exact`: a narrow noiseless exhaustive $(2,3)$ recovery
-  subgate with independent held-out primitives and one resumable shard per
-  instance.
+## Completed in this milestone
 
-Neither target is a phenomenon result. No five-checkpoint formation geometry,
-coarse boundary enrichment, snapping/recovery, three-seed confirmation,
-sampled synthetic sweep, or real-algebra evidence has been run. Those stages
-are `PLANNED`, and the runner refuses a target whose dependency closure includes
-one of them. Real-report CLI mode is also disabled; only the watermarked
-`MOCKUP` is publishable.
+- Identified Stefan Heimersheim and separated four distinct motivating source methods.
+  Two arXiv PDFs were read from hash-pinned local audit copies; the public repository
+  records official links and hashes but deliberately does not redistribute the PDFs.
+- Audited and strict-loaded complete seed-0 epoch 0/1/5/20/100 trajectories for the
+  Tracking2 ResNet-18 and VGG-19+BN models. Added a read-only, hash-pinned VGG input
+  stage without importing the sibling project's runners.
+- Added a deterministic three-class Gaussian-mixture task and normalization-free,
+  four-block residual MLP with numeric NPZ checkpoints.
+- Added collection for:
 
-## Implemented infrastructure
+    - real versus empirical-covariance-Gaussian centers;
+    - paired covariance-Gaussian perturbation targets and 37-point response paths;
+    - complete frozen CNN host contexts and exact site intervention vectors;
+    - $17\times17$ local response/Jacobian planes with raw $DT$ fields everywhere and
+      residual-update $D(T-I)$ fields for residual transitions;
+    - Hutchinson next-transition site Jacobians and ResNet $J-I$ estimates; and
+    - three-real-anchor, three-context $21\times21$ RGB/output-distance fields.
+- Added optional deterministic CUDA execution for `exp1.plateau.cifar`; saved arrays
+  remain CPU NumPy float32 with exact runtime backend provenance.
+- Added four fixed-layout, synchronized GIF bundles with static fallbacks and strict
+  media/readback validation.
+- Ran and integrity-verified the canonical protocol-v2 CPU pilot
+  `exp1-cpu-seed0-20260817-v4`.
 
-- Python 3.12 `uv` project with a checked-in lockfile and strict Pydantic/YAML
-  configuration. Duplicate keys, coercive scalar types, non-finite numbers,
-  unsupported strategies, and inconsistent axes are rejected.
-- Immutable SHA-256-addressed artifacts with canonical JSON, atomic
-  publication, checksum verification, safe payload paths, and stage-specific
-  semantic output contracts.
-- SQLite execution index with concurrency-safe initialization, atomic claims,
-  cross-run cache lineage, generation-checked cache invalidation/re-election,
-  explicit reclaim, interruption cleanup, append-only attempt/cache-election
-  histories, and immutable successful-run receipts. Scientific artifacts
-  remain cache-invariant across consumer runs.
-- Immutable run provenance and database-independent receipts. Receipts bind the
-  complete config, source identity, ordered stage closure, artifacts, cache
-  producers, attempts, gate rules/results/authorizations, and exact-instance
-  shard/reducer evidence.
-- Source-drift guards before resume/cache/handler boundaries and after handlers.
-  A long run aborts rather than publishing under a stale initial source hash.
-  Git identity is also bound to the bytes of the actually imported package.
-- Versioned semantic `SeedDeriver` namespaces for probes, sites, bootstrap
-  plans, mechanics, and every exact synthetic instance.
-- A hash-pinned, read-only Tracking2 adapter. It verifies the model source,
-  five weight-only checkpoints, separate CIFAR train/test Parquet files, and
-  legacy transplant JSON before use; it never imports Tracking2 runners or its
-  currently dirty validators. The immutable input artifact preserves the exact
-  manifest and raw transplant bytes, then reconstructs its normalized summary
-  from them during verification.
-- Reusable shard executor/reducer machinery. `exp2.exact` is the first default
-  proof of use: `runtime.workers=0` is sequential, positive values use bounded
-  threads, and scheduling does not change shard scientific identity.
-- Model-independent Experiment 1 primitives for coordinate metrics,
-  codebooks, nulls, interventions, boundary energy, image bootstrap summaries,
-  activation shard serialization, and descriptive transplant joins.
-- Synthetic generator, symmetry/twirl, support decomposition, alignment,
-  exhaustive search, sampling, and per-instance evidence persistence.
-- Caller-scoped semantic-validation memoization. A successful expensive
-  producer replay is reused within one runner/gate/receipt chain only after
-  rechecking its artifact, direct upstreams, and exact reducer/shard closure;
-  failures and changed config/contracts/source never reuse it.
-- Self-contained, offline Plotly/MathJax report builder. The current report is
-  interpretation-first and visibly `MOCKUP`; ordinary citation hyperlinks are
-  allowed, while fetch-bearing external resources and raw active Markdown HTML
-  are rejected. The artifact embeds both third-party license texts, preserves
-  the spec snapshot, and must exactly rerender from that snapshot plus its typed
-  payload.
-- A Python 3.11/3.12 CI matrix covering Ruff, formatting, the full core
-  suite, and true multiprocess artifact/index initialization contention, plus
-  a Python 3.12 CPU job that installs the optional ResNet dependencies and
-  exercises the adapter/mechanical path.
+The key implementation files are:
 
-`runtime.deterministic: true` currently means seeded, versioned construction
-for runnable CPU paths, not a cross-hardware bitwise guarantee. Accelerator and
-BLAS/thread determinism must be resolved and recorded before planned training
-or activation stages become runnable.
+- `src/voronoi_lab/exp1/synthetic_task.py`
+- `src/voronoi_lab/exp1/tracking2_vgg.py`
+- `src/voronoi_lab/exp1/surface_geometry.py`
+- `src/voronoi_lab/exp1/plateau_collection.py`
+- `src/voronoi_lab/exp1/animation.py`
+- stage integration in `src/voronoi_lab/{config,pipeline,stage_handlers,cli}.py`
+- focused tests under `tests/test_exp1_*` and `tests/test_tracking2_vgg_adapter.py`
 
-## Runnable DAG
+## Scientific semantics to preserve
 
-```text
-inputs.tracking2 -> exp1.probe_banks -> exp1.mechanical -> gate.mechanical
+Do not collapse these quantities under one name:
 
-exp2.exact (per-instance shards + reducer) -> gate.synthetic_exact
+1. `path_response_l2` and `path_response_kl` are the small-model analogue of the
+   Heimersheim--Mendel real-versus-covariance-Gaussian response experiment.
+2. `anchor_output_distances` and the derived RGB fields are a Janiak et al. stable-region
+   analogue. They are not Voronoi assignments and are not Jacobian fields.
+3. Plane finite differences and Hutchinson estimates are new hybrid diagnostics inspired
+   by the later Shinkle--Heimersheim Jacobian work.
+4. A fake center is a marginal site vector inserted into the same real frozen host as
+   its paired real center. It is intentionally not described as a complete fake CNN
+   activation state.
+5. Preserve raw transition fields for every architecture. For residual transitions,
+   inspect $J-I$ beside raw $J$ and display plane-restricted $D(T-I)$ by default because
+   the identity skip dominates raw same-site and plane norms. VGG has no residual-update
+   field and displays plane-restricted $DT$.
 
-report.build (zero-dependency MOCKUP only)
-```
+The canonical collection has four centers per kind and one legacy training seed. It is a
+visualization/data-contract pilot, not a powered plateau test. The ResNet/VGG comparison
+is descriptive and multiply confounded. Do not infer skip-connection causality.
 
-`gate.mechanical` also directly binds the saved probe-bank artifact. Gate
-outcomes are reconstructed from strict payloads and compared with the exact
-configured rule; a self-asserted `PASS`, mismatched rule, or unauthorized
-override is rejected on fresh output, cache hit, resume, CLI inspection, and
-receipt verification.
+## Canonical data and immutability
 
-## External substrate and caveats
+Use only the v4 IDs recorded in `artifacts/EXPERIMENT_1_DATA.md`. Earlier v1/v2 objects
+remain in the local store. The immutable v3 predecessor is also retained, but it
+predates the protocol-v2 residual-adjusted plane-display contract and is historical.
+Never edit any object in place. A methodological change requires a new protocol
+version, run ID, and content-addressed output.
 
-The sibling root is configured, never hard-coded, as
-`../Experiments/Tracking2`. Exact hashes live in
-`configs/inputs/tracking2_seed0.yaml`.
+The sibling Tracking2 root is `../Experiments/Tracking2`. It is read-only for this
+project. ResNet and VGG checkpoint lineage is explicitly `exploratory_legacy`; do not
+retroactively claim missing optimizer, RNG, package, Git, or dataset provenance.
 
-The five checkpoints contain only 42 fp32 tensors / 11,169,162 parameters—no
-optimizer, scheduler, or RNG state. The legacy transplant file also lacks
-modern provenance fields. Consequently the input manifest is labeled
-`lineage_quality: exploratory_legacy`. The sibling working tree contains a
-documented ResNet/VGG regression; do not execute or import its criticality
-runners or validators. Only the verified `tracking2.models` bytes are loaded.
+## Public release
 
-The external model/checkpoint/dataset bytes are hash-pinned but not vendored,
-so this repository alone is not clone-complete. The two mathematical design
-notes are archived under `references/notes/`; the motivating primary
-plateau/boundary literature is still unidentified.
+The source repository is public at <https://github.com/CharlesR-W/Voronoi>. Curated
+GIF/PNG/metadata presentation copies live under `docs/assets/experiment1/`; large
+checkpoints, datasets, immutable artifact stores, run databases, generated reports, and
+the local environment remain ignored. ArXiv PDF audit copies are also local-only because
+their distribution license does not grant this repository a separate redistribution
+right. The repository currently has no project-wide open-source license: public
+visibility permits viewing, but does not itself grant general reuse rights.
 
-Receipts prove content integrity, declared lineage, and conformance to the
-versioned result contracts. They are not cryptographic attestations that a
-trusted machine ran the code, and they do not independently recompute every
-scientific quantity from raw tensors. In particular, the mechanical validator
-reconstructs every reported identity/JVP statistic from saved logits and JVP
-vectors, but source provenance—not an independent model execution—binds those
-vectors to the pinned model. Raw provenance also retains local absolute paths
-(`cwd`, Git root, Python executable, and input locations); redact or restrict
-the receipt before publishing it outside the trusted research environment.
+## RunPod note
 
-## Commands
+Two temporary A40 pod setup attempts were deleted without uploading project data. The
+workspace upload was blocked by the environment's external-disclosure policy and was not
+circumvented. As of 2026-08-17 19:51 UTC there were no running or stopped recent pods,
+the current spend rate was `$0/hour`, and the billing endpoint had posted
+`$0.0154466592` total for the two attempts. This is safely below the authorized `$10`
+cap; later billing reconciliation could still adjust the final amount.
+
+## Recommended next analysis
+
+1. Choose a scalar plateau statistic and matched null before expanding the run. The
+   source papers use several different operationalizations; none should be silently
+   substituted for another.
+2. Use the stored raw response paths to estimate variability over centers/directions and
+   decide whether the current site/transition is worth scaling.
+3. If proceeding, add model seeds and more center hosts. Reuse fixed image identities and
+   global animation normalization, but publish under a new protocol/run.
+4. For an architecture claim, train matched ResNet and VGG-family models under a shared
+   recipe. The current legacy trajectories are insufficient.
+5. Keep the broader candidate-cell, snapping, commutant, and factorization work gated.
+
+## Verification
 
 ```bash
-uv sync --all-extras
 .venv/bin/python -m pytest -q
 .venv/bin/python -m ruff check src tests
 .venv/bin/python -m ruff format --check src tests
 
-.venv/bin/voronoi-lab validate --inputs --json
-.venv/bin/voronoi-lab plan --json
-.venv/bin/voronoi-lab run --until gate.mechanical --json
-.venv/bin/voronoi-lab run --until gate.synthetic_exact --json
-.venv/bin/voronoi-lab run --stage report.build --json
-
-# Verify a successful run without consulting SQLite:
-.venv/bin/voronoi-lab run receipt RECEIPT_ARTIFACT_ID --json
+.venv/bin/voronoi-lab artifact verify \
+  --artifact-root artifacts/exp1-measured --json \
+  a5afce7cdeb6d5d91e6408b5d7990c10cd2210906467ebcc6ba0aeb579ff2521 \
+  6a9e8cd36b73cc5d3434f43b3420167078a7176826c1b8c6dd39c61fd03d321b \
+  e0090abd43cfd95ae7def9204424dffb71e474d23bf78c91afcd252b8fadf8bf \
+  89a9f61b7d5c15a9dfa216075c3a2e9cd57db582e59f9b7c6d0b5555a7074930
 ```
 
-The standalone receipt command verifies immutable integrity and historical
-contracts. It deliberately reports current-source compatibility as
-`NOT_CHECKED` and current semantic replay as `SKIPPED`; receipt publication in
-the runner is the path that requires matching current source and strict
-semantic replay.
-
-For a crashed `RUNNING` record, inspect it and reclaim only with an explicit
-reason:
-
-```bash
-.venv/bin/voronoi-lab run inspect RUN_ID --json
-.venv/bin/voronoi-lab run reclaim RUN_ID STAGE --reason "worker host terminated" --json
-```
-
-## Provisional choices intentionally left replaceable
-
-- The exact motivating plateau/boundary definition and primary sources.
-- Codebook assignment-stability/refit details and scale normalization.
-- Empirical-chord/off-cloud construction and the nonuniform boundary path grid.
-- One-seed coarse and functional gate statistics.
-- The sampled synthetic “easy regime,” baselines, and calibration details.
-- The confirmation training recipe is explicit but marked `unfrozen`.
-
-`protocol.mode: confirmatory` is rejected until a future schema supports a
-registered full-protocol hash. Diagnostic overrides are scoped per gate and
-carry target, reason, actor, and timestamp; they never count as literal `PASS`.
-
-## Recommended next work
-
-1. Archive and audit the motivating primary papers; freeze the operational
-   plateau/boundary estimand against those sources.
-2. Implement `exp1.activations` using the existing shard executor and typed
-   activation payloads. Materialize the three configured input recipes once.
-3. Implement codebook/null/static-geometry/boundary handlers and the coarse
-   exploratory gate. Keep image-level bootstrap units and continuous
-   trapezoidal path-energy weighting explicit.
-4. Only if the coarse gate passes, implement snapping/recovery and freeze the
-   three-seed protocol. Do not enable nominal confirmatory mode first.
-5. In parallel, implement sampled synthetic recovery/null calibration. Keep it
-   separate from the already passing tiny exact optimization subgate.
-6. Enable measured report assembly only from verified receipt-linked typed
-   artifacts, with negative results and gate failures preserved.
-
-The canonical scientific specification remains `README.md`; update this file
-after every material infrastructure or evidence milestone.
+The concurrent dashboard/mock-up work belongs to another local agent. Preserve its
+changes in `README.md`, `reports/`, `src/voronoi_lab/reporting/`, and reporting tests.

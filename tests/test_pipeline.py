@@ -57,7 +57,15 @@ def test_every_runnable_default_stage_declares_a_strict_output_contract() -> Non
     assert runnable
     assert all(stage.expected_artifact_kind for stage in runnable)
     assert all(stage.required_payload_paths for stage in runnable)
-    assert all(stage.result_schema_version == 1 for stage in runnable)
+    v2_stages = {
+        "exp1.plateau.synthetic",
+        "exp1.plateau.cifar",
+        "exp1.plateau.animations",
+    }
+    assert {stage.name for stage in runnable if stage.result_schema_version == 2} == v2_stages
+    assert all(
+        stage.result_schema_version == (2 if stage.name in v2_stages else 1) for stage in runnable
+    )
     assert all(stage.payload_schema_id for stage in runnable)
     assert {stage.name for stage in runnable if stage.gate_payload_path is not None} == {
         "gate.mechanical",

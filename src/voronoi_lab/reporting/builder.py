@@ -24,10 +24,10 @@ from .payload import (
 
 TAB_ORDER = (
     ("overview", "Overview"),
-    ("formation", "Formation"),
-    ("snapping", "Snapping / recovery"),
-    ("synthetic", "Synthetic recovery"),
-    ("real_algebra", "Conditional real algebra"),
+    ("formation", "Exp 1A-1C · formation / boundaries"),
+    ("snapping", "Exp 1D-1E · snapping / recovery"),
+    ("synthetic", "Later gate · synthetic recovery"),
+    ("real_algebra", "Blocked · conditional algebra"),
     ("spec", "Spec"),
     ("provenance", "Provenance"),
 )
@@ -72,6 +72,7 @@ REPORT_CSS = r"""
   .caveat { color: #6d645b; max-width: 980px; font-size: 13px; }
   .overview-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr);
     gap: 24px; align-items: start; }
+  .overview-grid > *, .tab-panel > * { min-width: 0; }
   .experiment-map { counter-reset: experiment; list-style: none; padding: 0; }
   .experiment-map li { counter-increment: experiment; border-top: 1px solid #e5e1dc;
     padding: 10px 0 10px 36px; position: relative; }
@@ -88,6 +89,7 @@ REPORT_CSS = r"""
   @media (max-width: 760px) {
     body { margin: 14px auto; padding: 0 14px 36px; }
     .overview-grid, .guide { grid-template-columns: 1fr; }
+    .question, .status-box, .equation-box, .where-line { width: 100%; max-width: 100%; }
     .top-tabs { display: flex; overflow-x: auto; width: 100%; max-width: 100%; }
     .tab-btn { flex: 0 0 auto; }
   }
@@ -308,10 +310,25 @@ function renderLine(plot) {
     marker:{color:OKABE_ITO[series.color_key], size:6}, connectgaps:false,
     hovertemplate:esc(series.name) + '<br>x=%{x}<br>y=%{y:.4f}<extra></extra>'
   }));
+  const shapes = [];
+  const referenceAnnotations = [];
+  if (plot.x_reference != null) {
+    shapes.push({type:'line', x0:plot.x_reference, x1:plot.x_reference,
+      yref:'paper', y0:0, y1:1, line:{color:'#6d645b', width:1.4, dash:'dash'}});
+    referenceAnnotations.push({xref:'x', yref:'paper', x:plot.x_reference, y:1.03,
+      text:plot.x_reference_label, showarrow:false, font:{size:11, color:'#6d645b'}});
+  }
+  if (plot.y_reference != null) {
+    shapes.push({type:'line', y0:plot.y_reference, y1:plot.y_reference,
+      xref:'paper', x0:0, x1:1, line:{color:'#6d645b', width:1.4, dash:'dash'}});
+    referenceAnnotations.push({xref:'paper', yref:'y', x:1, y:plot.y_reference,
+      text:plot.y_reference_label, xanchor:'right', yanchor:'bottom', showarrow:false,
+      font:{size:11, color:'#6d645b'}});
+  }
   const layout = merge(LAYOUT_BASE, {
     height:500, margin:{l:64, r:18, t:92, b:60},
     title:{text:plot.title, font:{size:15}, x:0.5, y:0.98},
-    annotations:mockWatermark(),
+    annotations:mockWatermark().concat(referenceAnnotations), shapes:shapes,
     xaxis:merge(LAYOUT_BASE.xaxis, {title:plot.x_label, range:plot.x_range, autorange:false}),
     yaxis:merge(LAYOUT_BASE.yaxis, {title:plot.y_label, range:plot.y_range, autorange:false}),
     legend:{orientation:'h', x:0, y:1.14, font:{size:11}}
@@ -388,10 +405,10 @@ def render_report(payload: ReportPayload, readme_markdown: str) -> str:
         )
 
     mockup = True
-    title = "Voronoi Residual Computation Lab — MOCKUP"
+    title = "Voronoi Experiment 1 Dashboard — MOCKUP"
     subtitle = (
-        "A gated, self-contained research report. Definitions, planned tests, and measured results "
-        "remain explicitly separated."
+        "Synthetic plot patterns for the planned candidate-cell formation, boundary, snapping, "
+        "recovery, and module-comparison tests."
     )
     report = Report(title, subtitle)
     report.html(REPORT_CSS)

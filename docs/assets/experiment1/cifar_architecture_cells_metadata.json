@@ -1,0 +1,185 @@
+{
+  "animation_kind": "architecture_cells_and_jacobians",
+  "canvas": {
+    "height": 900,
+    "width": 1440
+  },
+  "checkpoint_panels_synchronized": true,
+  "comparison_note": "The rows use different operators and legacy training recipes; this is a descriptive, confounded side-by-side view, not a causal architecture ablation.",
+  "files": {
+    "final_png": "cifar_architecture_cells_final.png",
+    "gif": "cifar_architecture_cells.gif",
+    "metadata": "cifar_architecture_cells_metadata.json"
+  },
+  "gif_badge": true,
+  "input_checkpoint_count": 5,
+  "input_checkpoints": [
+    "epoch 0",
+    "epoch 1",
+    "epoch 5",
+    "epoch 20",
+    "epoch 100"
+  ],
+  "jacobian_estimands": {
+    "resnet": "2D-plane-restricted ||D(T-I)||_F",
+    "vgg": "2D-plane-restricted ||DT||_F"
+  },
+  "labels": {
+    "final_callout": "Final checkpoint \u2192 inspect each row's sensitivity structure. ResNet shows 2D D(T-I), VGG shows 2D DT; the view is descriptive and confounded.",
+    "jacobian": "2D \u2016\u00b7\u2016F",
+    "resnet_jacobian": "NEW HYBRID \u00b7 D(T-I)",
+    "rgb": "SOURCE ANALOGUE \u00b7 THREE-ANCHOR RGB",
+    "title": "CIFAR residual-adjusted / VGG raw fields",
+    "vgg_jacobian": "NEW HYBRID \u00b7 DT"
+  },
+  "layout_fixed_across_frames": true,
+  "presentation_hold_frame_count": 1,
+  "rendered_frame_count": 6,
+  "rendered_frames": [
+    {
+      "checkpoint": "epoch 0",
+      "duration_ms": 3000,
+      "index": 0,
+      "role": "orientation"
+    },
+    {
+      "checkpoint": "epoch 1",
+      "duration_ms": 1000,
+      "index": 1,
+      "role": "checkpoint"
+    },
+    {
+      "checkpoint": "epoch 5",
+      "duration_ms": 1000,
+      "index": 2,
+      "role": "checkpoint"
+    },
+    {
+      "checkpoint": "epoch 20",
+      "duration_ms": 1000,
+      "index": 3,
+      "role": "checkpoint"
+    },
+    {
+      "checkpoint": "epoch 100",
+      "duration_ms": 1000,
+      "index": 4,
+      "role": "checkpoint"
+    },
+    {
+      "checkpoint": "epoch 100",
+      "duration_ms": 6000,
+      "index": 5,
+      "role": "conclusion"
+    }
+  ],
+  "rendering": {
+    "engine": "Pillow",
+    "font_bold": {
+      "family": "DejaVu Sans",
+      "file": "DejaVuSans-Bold.ttf",
+      "sha256": "b5d64817b6331723b5e59eaaa6db90057cbed58e9733f65687f110638192359f",
+      "style": "Bold"
+    },
+    "font_regular": {
+      "family": "DejaVu Sans",
+      "file": "DejaVuSans.ttf",
+      "sha256": "6038a160b491e121c1f12c7bccb4a9c8730296e3adc1086a059404ed84b7451c",
+      "style": "Book"
+    },
+    "gif_quantization": {
+      "colors": 256,
+      "dither": "none",
+      "method": "median_cut"
+    },
+    "pillow_version": "11.3.0"
+  },
+  "rgb_estimand": "three frozen-context downstream-logit L2 distances encoded as per-architecture/channel-normalized RGB; not discovered or stable cells",
+  "scales": {
+    "alpha_coordinates": [
+      -0.25,
+      -0.17499999701976776,
+      -0.10000000149011612,
+      -0.02500000037252903,
+      0.05000000074505806,
+      0.125,
+      0.20000000298023224,
+      0.2750000059604645,
+      0.3499999940395355,
+      0.42500001192092896,
+      0.5,
+      0.574999988079071,
+      0.6499999761581421,
+      0.7250000238418579,
+      0.800000011920929,
+      0.875,
+      0.949999988079071,
+      1.024999976158142,
+      1.100000023841858,
+      1.1749999523162842,
+      1.25
+    ],
+    "array_coordinate_contract": "row_zero_is_minimum_y",
+    "beta_coordinates": [
+      -0.25,
+      -0.17499999701976776,
+      -0.10000000149011612,
+      -0.02500000037252903,
+      0.05000000074505806,
+      0.125,
+      0.20000000298023224,
+      0.2750000059604645,
+      0.3499999940395355,
+      0.42500001192092896,
+      0.5,
+      0.574999988079071,
+      0.6499999761581421,
+      0.7250000238418579,
+      0.800000011920929,
+      0.875,
+      0.949999988079071,
+      1.024999976158142,
+      1.100000023841858,
+      1.1749999523162842,
+      1.25
+    ],
+    "jacobian": {
+      "clips_data": false,
+      "data_max": 0.6668164134025574,
+      "data_min": 0.12133902311325073,
+      "display_max": 0.6668164134025574,
+      "display_min": 0.12133902311325073,
+      "source": "computed_global"
+    },
+    "plane_extent": [
+      -0.25,
+      1.25,
+      -0.25,
+      1.25
+    ],
+    "rgb_cells": {
+      "comparability_contract": "per_architecture_channel_normalization_not_absolute_cross_architecture_scale",
+      "display_max": 1.0,
+      "display_min": 0.0,
+      "normalization_scope": "fixed_across_all_checkpoints_within_architecture",
+      "resnet_channel_maxima": [
+        5.839437484741211,
+        5.200816631317139,
+        7.3418684005737305
+      ],
+      "source": "caller_prepared_with_declared_global_channel_maxima",
+      "vgg_channel_maxima": [
+        0.9432960748672485,
+        0.27026480436325073,
+        0.7110323905944824
+      ]
+    }
+  },
+  "schema_version": 2,
+  "timing": {
+    "checkpoint_ms": 1000,
+    "conclusion_ms": 6000,
+    "loop": 0,
+    "orientation_ms": 3000
+  }
+}
